@@ -1,0 +1,192 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+*' # Trigger on tags like v0.1.0, v1.2.3, v1.0.0-beta1
+
+permissions:
+  contents: write # Needed to create releases and upload assets
+  packages: write # Needed to push docker image to GHCR
+
+env:
+  CARGO_TERM_COLOR: always
+  BINARY_NAME: dcd
+  GITHUB_REPO: ${{ github.repository }}
+  ACTION_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/dcd-action
+
+jobs:
+  verify_version:
+    name: Verify Version Match
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }} # Output the verified version
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install jq (for parsing cargo metadata)
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Verify tag version matches Cargo.toml version
+        id: check # Give the step an ID to reference its output
+        run: |
+          # Extract version from Cargo.toml using cargo-metadata for robustness
+          CARGO_VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name=="dcd") | .version')
+
+          # Extract version from tag (remove 'v' prefix)
+          TAG_VERSION=${GITHUB_REF_NAME#v}
+
+          echo "Cargo.toml version: $CARGO_VERSION"
+          echo "Tag version: $TAG_VERSION"
+
+          # Compare versions
+          if [ "$CARGO_VERSION" != "$TAG_VERSION" ]; then
+            echo "Error: Version mismatch between Cargo.toml ($CARGO_VERSION) and git tag ($TAG_VERSION)"
+            exit 1
+          fi
+          echo "Version verification successful: $CARGO_VERSION"
+          # Set the verified version as an output
+          echo "version=$CARGO_VERSION" >> $GITHUB_OUTPUT
+
+  build_release_binaries:
+    name: Build Release Binaries
+    needs: verify_version
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            archive_suffix: tar.gz
+            asset_name_suffix: linux-musl
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            archive_suffix: tar.gz
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            archive_suffix: tar.gz
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }} # Install target for cross-compilation if needed
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build binary
+        run: cargo build --release --target ${{ matrix.target }} --verbose
+
+      - name: Determine Release Asset Base Name
+        id: asset_info
+        run: |
+          asset_base="${{ env.BINARY_NAME }}-${{ matrix.target }}"
+          echo "asset_base_name=${asset_base}" >> $GITHUB_OUTPUT
+          echo "Binary path: target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}${{ matrix.os == 'windows-latest' && '.exe' || '' }}" # Debug output
+
+      - name: Package for Linux/macOS
+        if: matrix.os != 'windows-latest'
+        run: |
+          staging_dir="${{ steps.asset_info.outputs.asset_base_name }}"
+          mkdir -p "$staging_dir"
+          cp "target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}" "$staging_dir/"
+          cp README.md "$staging_dir/"
+          cp LICENSE "$staging_dir/"
+          tar czf "${staging_dir}.${{ matrix.archive_suffix }}" "$staging_dir"
+          echo "ASSET_PATH=${staging_dir}.${{ matrix.archive_suffix }}" >> $GITHUB_ENV
+
+      - name: Upload Release Asset (Intermediate)
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-asset-${{ matrix.target }}${{ matrix.asset_name_suffix || '' }}
+          path: ${{ env.ASSET_PATH }}
+
+      - name: Upload Linux Binary Artifact
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-binary
+          path: target/x86_64-unknown-linux-musl/release/${{ env.BINARY_NAME }}
+
+  build_and_push_action_image:
+    name: Build and Push Action Docker Image
+    needs: build_release_binaries # Depends on the binary build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download Linux dcd binary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-binary # Matches the upload name
+          path: .github/actions/dcd-deploy
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .github/actions/dcd-deploy # Path to the action's directory
+          file: .github/actions/dcd-deploy/Dockerfile
+          push: true
+          tags: |
+            ${{ env.ACTION_IMAGE_NAME }}:${{ github.ref_name }}
+            ${{ env.ACTION_IMAGE_NAME }}:latest
+
+
+  create_github_release:
+    name: Create GitHub Release
+    needs: [build_release_binaries, build_and_push_action_image]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code (needed for release notes generation)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetches all history for better release notes
+
+      - name: Download all release assets
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets # Download all artifacts to this directory
+          # Pattern matching ensures we get all assets uploaded previously
+          pattern: release-asset-*
+          merge-multiple: true # Merge artifacts into the single 'release-assets' dir
+
+      - name: List downloaded assets (for debugging)
+        run: ls -R release-assets
+
+      - name: Create Release and Upload Assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Provided by Actions automatically
+        run: |
+          gh release create ${{ github.ref_name }} \
+            --generate-notes \
+            --title "${{ github.ref_name }}" \
+            release-assets/* # Upload all files from the download directory
+
+  publish_crate:
+    name: Publish to Crates.io
+    needs: create_github_release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Publish conditionally within script
+        env:
+          CRATES_IO_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: |
+          if [ -n "$CRATES_IO_TOKEN" ]; then
+            echo "CRATES_IO_TOKEN secret is set. Publishing to Crates.io..."
+            cargo publish
+          else
+            echo "Skipping publish to Crates.io: CRATES_IO_TOKEN secret not set or empty."
+            exit 0
+          fi

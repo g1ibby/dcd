@@ -1,0 +1,50 @@
+name: 'Docker Compose Deployment'
+description: 'Deploy Docker Compose services to remote servers via SSH'
+author: 'g1ibby'
+branding:
+  icon: 'upload-cloud'
+  color: 'blue'
+
+inputs:
+  command:
+    description: 'Command to execute (analyze, up, status, destroy)'
+    required: true
+    default: 'up'
+  compose_files:
+    description: 'Space-separated list of Docker Compose files'
+    required: false
+    default: 'docker-compose.yml'
+  env_files:
+    description: 'Space-separated list of environment files'
+    required: false
+    default: ''
+  host:
+    description: 'Remote server IP address'
+    required: true
+  port:
+    description: 'SSH port'
+    required: false
+    default: '22'
+  user:
+    description: 'SSH user'
+    required: false
+    default: 'root'
+  ssh_private_key:
+    description: 'SSH private key content'
+    required: true
+  remote_dir:
+    description: 'Remote working directory'
+    required: false
+    default: '/opt/dcd'
+  no_health_check:
+    description: 'Skip health check after deployment (for up command)'
+    required: false
+    default: 'false'
+  force:
+    description: 'Force destruction without confirmation (for destroy command)'
+    required: false
+    default: 'false'
+
+runs:
+  using: 'docker'
+  image: 'docker://ghcr.io/g1ibby/dcd-action:${{ github.action_ref }}'

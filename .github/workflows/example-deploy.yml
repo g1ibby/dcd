@@ -1,0 +1,45 @@
+name: Example Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      command:
+        description: 'DCD command to run'
+        required: true
+        default: 'up'
+        type: choice
+        options:
+          - analyze
+          - up
+          - status
+          - destroy
+
+jobs:
+  deploy:
+    name: Deploy to ${{ github.event.inputs.environment }}
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy with DCD
+        uses: ./.github/actions/dcd-deploy
+        with:
+          command: ${{ github.event.inputs.command }}
+          compose_files: "docker-compose.yml docker-compose.${{ github.event.inputs.environment }}.yml"
+          env_files: ".env.${{ github.event.inputs.environment }}"
+          host: ${{ secrets.SSH_HOST }}
+          user: ${{ secrets.SSH_USER }}
+          ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
+          remote_dir: "/opt/myapp-${{ github.event.inputs.environment }}"
+          no_health_check: "false"
+          force: ${{ github.event.inputs.command == 'destroy' }}
