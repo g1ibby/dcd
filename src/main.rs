@@ -19,7 +19,7 @@ async fn main() {
     // If progress is likely active, hide INFO logs by default to keep output clean.
     // Otherwise, show INFO logs by default. Verbosity flags override this.
     let default_level = if progress_likely_active && cli_args.verbose == 0 {
-        LevelFilter::WARN // Hide INFO when progress bar is active and no -v
+        LevelFilter::INFO // Hide INFO when progress bar is active and no -v
     } else {
         // Show INFO by default, or DEBUG/TRACE if -v/-vv is set
         match cli_args.verbose {

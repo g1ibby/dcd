@@ -4,7 +4,7 @@ mod types;
 mod validator;
 
 use crate::deployer::types::ComposeExec;
-use crate::executor::{CommandExecutor, CommandResult, FileTransfer};
+use crate::executor::{CommandExecutor, CommandResult, FileTransfer, OutputError};
 use async_trait::async_trait;
 pub use error::DockerError;
 use installer::DockerInstaller;
@@ -265,7 +265,7 @@ impl DockerManager for SshDockerManager<'_> {
 
     async fn get_services_status(&mut self) -> DockerResult<ComposeStatus> {
         let result = self
-            .execute_compose_command("docker-compose ps --format json | jq -s .")
+            .execute_compose_command("docker-compose ps --format json")
             .await?;
 
         if !result.is_success() {
@@ -275,7 +275,27 @@ impl DockerManager for SshDockerManager<'_> {
             });
         }
 
-        let services: Vec<ServiceStatus> = result.parse_json()?;
+        // Parse the JSON output into ServiceStatus structs.
+        // Some versions emit a JSON array, others emit one JSON object per line.
+        let stdout = result.output.to_stdout_string()?;
+        let services: Vec<ServiceStatus> = if stdout.trim_start().starts_with('[') {
+            // entire array as JSON
+            serde_json::from_str(&stdout)
+                .map_err(|e| DockerError::Output(OutputError::JsonError(e)))?
+        } else {
+            // line-delimited JSON objects
+            let mut v = Vec::new();
+            for line in stdout.lines() {
+                let line = line.trim();
+                if line.is_empty() {
+                    continue;
+                }
+                let svc: ServiceStatus = serde_json::from_str(line)
+                    .map_err(|e| DockerError::Output(OutputError::JsonError(e)))?;
+                v.push(svc);
+            }
+            v
+        };
         Ok(ComposeStatus { services })
     }
 
