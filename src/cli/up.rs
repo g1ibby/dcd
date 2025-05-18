@@ -74,7 +74,7 @@ impl Up {
             let deploy_pb = ui::create_spinner("Initializing deployment..."); // Initial message
 
             // Spawn a task to listen for progress events and update the UI
-            // Clone the ProgressBar for the task. Cloning is cheap (Arc).
+            // Clone the ProgressBar for the task.
             let ui_task = tokio::spawn(handle_deployer_events(receiver, deploy_pb.clone()));
 
             // Return the sender and the task handle (wrapped in Some)
