@@ -183,8 +183,31 @@ impl<'a> Deployer<'a> {
 
         // Create Docker manager
         tracing::debug!("Initializing Docker manager for destruction.");
-        let mut docker_manager =
-            SshDockerManager::new(self.executor, self.resolved_remote_dir.clone()).await?;
+        // Build list of remote compose and env files (basenames)
+        let compose_files = self
+            .config
+            .compose_files
+            .iter()
+            .map(|p| PathBuf::from(p.file_name().expect("Invalid compose file path")))
+            .collect::<Vec<PathBuf>>();
+        let mut env_files = self
+            .config
+            .env_files
+            .iter()
+            .map(|p| PathBuf::from(p.file_name().expect("Invalid env file path")))
+            .collect::<Vec<PathBuf>>();
+        // Include generated .env.dcd if present
+        let dcd_path = self.config.project_dir.join(DCD_ENV_FILE);
+        if dcd_path.exists() {
+            env_files.push(PathBuf::from(DCD_ENV_FILE));
+        }
+        let mut docker_manager = SshDockerManager::new(
+            self.executor,
+            self.resolved_remote_dir.clone(),
+            compose_files,
+            env_files,
+        )
+        .await?;
 
         // Check if any services are running
         tracing::info!("Checking for running services...");
@@ -503,8 +526,31 @@ impl<'a> Deployer<'a> {
     /// Deploy services using docker-compose
     async fn deploy_services(&mut self, status: &mut DeploymentStatus) -> DeployResult<()> {
         tracing::debug!("Initializing Docker manager for service deployment.");
-        let mut docker_manager =
-            SshDockerManager::new(self.executor, self.resolved_remote_dir.clone()).await?;
+        // Build list of remote compose and env files (basenames)
+        let compose_files = self
+            .config
+            .compose_files
+            .iter()
+            .map(|p| PathBuf::from(p.file_name().expect("Invalid compose file path")))
+            .collect::<Vec<PathBuf>>();
+        let mut env_files = self
+            .config
+            .env_files
+            .iter()
+            .map(|p| PathBuf::from(p.file_name().expect("Invalid env file path")))
+            .collect::<Vec<PathBuf>>();
+        // Include generated .env.dcd if present
+        let dcd_path = self.config.project_dir.join(DCD_ENV_FILE);
+        if dcd_path.exists() {
+            env_files.push(PathBuf::from(DCD_ENV_FILE));
+        }
+        let mut docker_manager = SshDockerManager::new(
+            self.executor,
+            self.resolved_remote_dir.clone(),
+            compose_files,
+            env_files,
+        )
+        .await?;
 
         tracing::info!("Ensuring Docker is installed on remote host...");
         docker_manager
@@ -712,8 +758,26 @@ impl<'a> Deployer<'a> {
                 ))
                 .await;
         }
-        let mut docker_manager =
-            SshDockerManager::new(self.executor, self.resolved_remote_dir.clone()).await?;
+        // Build list of remote compose and env files (basenames)
+        let compose_files = self
+            .config
+            .compose_files
+            .iter()
+            .map(|p| PathBuf::from(p.file_name().expect("Invalid compose file path")))
+            .collect::<Vec<PathBuf>>();
+        let env_files = self
+            .config
+            .env_files
+            .iter()
+            .map(|p| PathBuf::from(p.file_name().expect("Invalid env file path")))
+            .collect::<Vec<PathBuf>>();
+        let mut docker_manager = SshDockerManager::new(
+            self.executor,
+            self.resolved_remote_dir.clone(),
+            compose_files,
+            env_files,
+        )
+        .await?;
         if let Some(sender) = &cloned_sender {
             let _ = sender
                 .send(DeployerEvent::StepCompleted(

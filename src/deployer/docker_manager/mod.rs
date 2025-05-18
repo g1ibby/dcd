@@ -190,12 +190,19 @@ pub struct SshDockerManager<'a> {
     executor: &'a mut (dyn ComposeExec + Send),
     distro: LinuxDistro,
     working_directory: PathBuf,
+    /// List of compose files (relative to working directory or absolute paths)
+    compose_files: Vec<PathBuf>,
+    /// List of env files
+    env_files: Vec<PathBuf>,
 }
 
 impl<'a> SshDockerManager<'a> {
+    /// Create a new Docker manager for SSH, specifying compose and env files to use.
     pub async fn new(
         executor: &'a mut (dyn ComposeExec + Send),
         working_directory: PathBuf,
+        compose_files: Vec<PathBuf>,
+        env_files: Vec<PathBuf>,
     ) -> DockerResult<Self> {
         let mut validator = DockerValidator::new(executor);
         let distro = validator.detect_distro().await?;
@@ -204,6 +211,8 @@ impl<'a> SshDockerManager<'a> {
             executor,
             distro,
             working_directory,
+            compose_files,
+            env_files,
         };
 
         // Verify working directory exists
@@ -232,6 +241,22 @@ impl<'a> SshDockerManager<'a> {
             .execute_command(&full_cmd)
             .await
             .map_err(DockerError::from)
+    }
+
+    /// Build a docker-compose command string with configured compose files and env files.
+    fn format_docker_compose_command(&self, subcommand: &str) -> String {
+        let mut cmd = String::from("docker-compose");
+        for cf in &self.compose_files {
+            cmd.push_str(" -f ");
+            cmd.push_str(&cf.to_string_lossy());
+        }
+        for ef in &self.env_files {
+            cmd.push_str(" --env-file ");
+            cmd.push_str(&ef.to_string_lossy());
+        }
+        cmd.push(' ');
+        cmd.push_str(subcommand);
+        cmd
     }
 }
 
@@ -264,9 +289,9 @@ impl DockerManager for SshDockerManager<'_> {
     }
 
     async fn get_services_status(&mut self) -> DockerResult<ComposeStatus> {
-        let result = self
-            .execute_compose_command("docker-compose ps --format json")
-            .await?;
+        // Use configured compose and env files when listing services
+        let cmd = self.format_docker_compose_command("ps --format json");
+        let result = self.execute_compose_command(&cmd).await?;
 
         if !result.is_success() {
             return Err(DockerError::CommandError {
@@ -300,12 +325,12 @@ impl DockerManager for SshDockerManager<'_> {
     }
 
     async fn compose_up(&mut self) -> DockerResult<()> {
-        let commands = [
-            "docker-compose pull",
-            "docker-compose up -d --remove-orphans",
-        ];
+        // Pull latest images and start services with configured compose and env files
+        let pull_cmd = self.format_docker_compose_command("pull");
+        let up_cmd = self.format_docker_compose_command("up -d --remove-orphans");
+        let commands = [pull_cmd, up_cmd];
 
-        for cmd in commands {
+        for cmd in &commands {
             tracing::info!("Executing compose command: '{}'", cmd);
             let result = self.execute_compose_command(cmd).await?;
 
@@ -419,16 +444,14 @@ impl DockerManager for SshDockerManager<'_> {
         remove_volumes: bool,
         remove_images: bool,
     ) -> DockerResult<()> {
-        let mut cmd_parts = vec!["docker-compose", "down"];
+        // Stop services and remove containers/networks with configured compose and env files
+        let mut cmd = self.format_docker_compose_command("down");
         if remove_volumes {
-            cmd_parts.push("-v");
+            cmd.push_str(" -v");
         }
         if remove_images {
-            cmd_parts.push("--rmi");
-            cmd_parts.push("all");
-        };
-        let cmd = cmd_parts.join(" ");
-
+            cmd.push_str(" --rmi all");
+        }
         let result = self.execute_compose_command(&cmd).await?;
         if !result.is_success() {
             return Err(DockerError::CommandError {
