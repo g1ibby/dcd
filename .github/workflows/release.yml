@@ -82,10 +82,9 @@ jobs:
         run: |
           asset_base="${{ env.BINARY_NAME }}-${{ matrix.target }}"
           echo "asset_base_name=${asset_base}" >> $GITHUB_OUTPUT
-          echo "Binary path: target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}${{ matrix.os == 'windows-latest' && '.exe' || '' }}" # Debug output
+          echo "Binary path: target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}" # Debug output
 
       - name: Package for Linux/macOS
-        if: matrix.os != 'windows-latest'
         run: |
           staging_dir="${{ steps.asset_info.outputs.asset_base_name }}"
           mkdir -p "$staging_dir"
