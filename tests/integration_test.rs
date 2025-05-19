@@ -57,7 +57,8 @@ async fn test_dcd_up() {
         "      - \"8080:80\"",
     ]
     .join("\n");
-    let project = TestProject::new(&compose_content, "").await;
+    let remote_workdir = "/opt/test_dcd_up";
+    let project = TestProject::new(&compose_content, "", remote_workdir).await;
 
     // Run the DCD up command to deploy nginx
     let target = format!("root@localhost:{}", ssh_port);
@@ -72,7 +73,7 @@ async fn test_dcd_up() {
             "-i",
             "test_ssh_key",
             "-w",
-            "/opt/test_dcd_up",
+            remote_workdir,
             "up",
             "--no-health-check",
             &target,
@@ -116,58 +117,8 @@ async fn test_dcd_up() {
         ps_stdout
     );
 
-    // Teardown deployment via 'destroy'
-    let destroy_output = Command::new("cargo")
-        .args([
-            "run",
-            "-q",
-            "--",
-            "-f",
-            project.compose_path.to_str().unwrap(),
-            "-e",
-            project.env_path.to_str().unwrap(),
-            "-i",
-            "tests/test_ssh_key",
-            "-w",
-            "/opt/test_dcd_up",
-            "destroy",
-            "--force",
-            &target,
-        ])
-        .output()
-        .await
-        .expect("Failed to execute DCD destroy command");
-    assert!(
-        destroy_output.status.success(),
-        "DCD destroy command failed: {}",
-        String::from_utf8_lossy(&destroy_output.stderr)
-    );
-    let destroy_stdout = String::from_utf8_lossy(&destroy_output.stdout);
-    let destroy_stderr = String::from_utf8_lossy(&destroy_output.stderr);
-    assert!(
-        destroy_stdout.contains("Deployment destroyed successfully")
-            || destroy_stderr.contains("Deployment destroyed successfully"),
-        "Unexpected destroy output:\n--- STDOUT ---\n{}\n--- STDERR ---\n{}",
-        destroy_stdout,
-        destroy_stderr
-    );
-
-    // Verify nginx container is no longer running
-    let ps_after = ssh_cmd(
-        ssh_port,
-        "tests/test_ssh_key",
-        "root@localhost",
-        &["docker", "ps"],
-    )
-    .output()
-    .await
-    .expect("Failed to execute SSH docker ps after destroy");
-    let ps_after_stdout = String::from_utf8_lossy(&ps_after.stdout);
-    assert!(
-        !ps_after_stdout.contains("nginx"),
-        "Nginx container still running after destroy: {}",
-        ps_after_stdout
-    );
+    // Teardown deployment and verify
+    project.destroy(&target, ssh_port, &["nginx"]).await;
 
     // Stop helper container
     container.stop().await.unwrap();
@@ -196,7 +147,8 @@ async fn test_dcd_up_with_env_and_defaults() {
     ]
     .join("\n");
     let env_content = "FILE_VAR=file_val\n";
-    let project = TestProject::new(&compose_content, env_content).await;
+    let remote_workdir = "/opt/test_dcd_up_with_env_and_defaults";
+    let project = TestProject::new(&compose_content, env_content, remote_workdir).await;
 
     // Run the DCD up command with --no-health-check, setting SYSTEM_VAR in environment
     let target = format!("root@localhost:{}", ssh_port);
@@ -211,7 +163,7 @@ async fn test_dcd_up_with_env_and_defaults() {
             "-i",
             "test_ssh_key",
             "-w",
-            "/opt/test_dcd_up_with_env_and_defaults",
+            remote_workdir,
             "up",
             "--no-health-check",
             &target,
@@ -281,30 +233,8 @@ async fn test_dcd_up_with_env_and_defaults() {
         env_stdout
     );
 
-    // Teardown deployment via 'destroy'
-    let destroy_output = Command::new(&project.dcd_bin_path)
-        .current_dir(&project.project_dir)
-        .args([
-            "-f",
-            project.compose_path.to_str().unwrap(),
-            "-e",
-            project.env_path.to_str().unwrap(),
-            "-i",
-            "test_ssh_key",
-            "-w",
-            "/opt/test_dcd_up_with_env_and_defaults",
-            "destroy",
-            "--force",
-            &target,
-        ])
-        .output()
-        .await
-        .expect("Failed to execute DCD destroy command");
-    assert!(
-        destroy_output.status.success(),
-        "DCD destroy command failed: {}",
-        String::from_utf8_lossy(&destroy_output.stderr)
-    );
+    // Teardown deployment and verify
+    project.destroy(&target, ssh_port, &["test_env"]).await;
 
     container.stop().await.unwrap();
 }
@@ -328,9 +258,14 @@ async fn test_dcd_redeploy_with_changes() {
     ]
     .join("\n");
     let initial_env_content = "MY_VAR=initial_value\n";
-    let project = TestProject::new(&initial_compose_content, initial_env_content).await;
-    let target = format!("root@localhost:{}", ssh_port);
     let remote_workdir = "/opt/test_dcd_redeploy";
+    let project = TestProject::new(
+        &initial_compose_content,
+        initial_env_content,
+        remote_workdir,
+    )
+    .await;
+    let target = format!("root@localhost:{}", ssh_port);
 
     // --- First Deployment ---
     let mut cmd_up1 = Command::new(&project.dcd_bin_path);
@@ -476,7 +411,7 @@ async fn test_dcd_redeploy_with_changes() {
         stderr_up2
     );
 
-    sleep(Duration::from_secs(10)).await; // Allow more time for compose to reconcile changes
+    sleep(Duration::from_secs(10)).await;
 
     // Verify after redeploy
     let ps_output2 = ssh_cmd(
@@ -532,66 +467,13 @@ async fn test_dcd_redeploy_with_changes() {
     );
 
     // --- Teardown ---
-    let mut cmd_destroy = Command::new(&project.dcd_bin_path);
-    cmd_destroy.current_dir(&project.project_dir).args([
-        "-f",
-        project.compose_path.to_str().unwrap(), // Use the latest compose file for destroy
-        "-e",
-        project.env_path.to_str().unwrap(),
-        "-i",
-        "test_ssh_key",
-        "-w",
-        remote_workdir,
-        "destroy",
-        "--force",
-        &target,
-    ]);
-    let output_destroy = cmd_destroy
-        .output()
-        .await
-        .expect("Failed to execute DCD destroy command");
-    assert!(
-        output_destroy.status.success(),
-        "DCD destroy command failed: stderr: {}, stdout: {}",
-        String::from_utf8_lossy(&output_destroy.stderr),
-        String::from_utf8_lossy(&output_destroy.stdout)
-    );
-    let stdout_destroy = String::from_utf8_lossy(&output_destroy.stdout);
-    let stderr_destroy = String::from_utf8_lossy(&output_destroy.stderr);
-    assert!(
-        stdout_destroy.contains("Deployment destroyed successfully")
-            || stderr_destroy.contains("Deployment destroyed successfully"),
-        "Unexpected destroy output:\n--- STDOUT ---\n{}\n--- STDERR ---\n{}",
-        stdout_destroy,
-        stderr_destroy
-    );
-
-    // Verify all containers are gone
-    sleep(Duration::from_secs(5)).await;
-    let ps_after_destroy = ssh_cmd(
-        ssh_port,
-        "tests/test_ssh_key",
-        "root@localhost",
-        &["docker", "ps", "--format", "{{.Names}}", "-a"],
-    ) // -a to see all containers, even stopped
-    .output()
-    .await
-    .expect("SSH docker ps failed (after destroy)");
-    assert!(
-        ps_after_destroy.status.success(),
-        "SSH docker ps command failed (after destroy)"
-    );
-    let ps_stdout_after_destroy = String::from_utf8_lossy(&ps_after_destroy.stdout);
-    assert!(
-        !ps_stdout_after_destroy.contains("service1_redeploy"),
-        "service1_redeploy still present after destroy: {}",
-        ps_stdout_after_destroy
-    );
-    assert!(
-        !ps_stdout_after_destroy.contains("service2_redeploy"),
-        "service2_redeploy still present after destroy: {}",
-        ps_stdout_after_destroy
-    );
+    project
+        .destroy(
+            &target,
+            ssh_port,
+            &["service1_redeploy", "service2_redeploy"],
+        )
+        .await;
 
     container.stop().await.unwrap();
 }

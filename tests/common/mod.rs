@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::path::PathBuf;
+use std::time::Duration;
 use tempfile::TempDir;
 use testcontainers::core::{Image, WaitFor};
 use testcontainers::{
@@ -8,6 +9,8 @@ use testcontainers::{
     ContainerAsync, ImageExt,
 };
 use tokio::fs;
+use tokio::process::Command;
+use tokio::time::sleep;
 
 /// Public key for SSH key-based authentication, read from test_ssh_key.pub.
 pub const AUTHORIZED_KEY: &str = include_str!("../test_ssh_key.pub");
@@ -127,11 +130,12 @@ pub struct TestProject {
     pub compose_path: PathBuf,
     pub env_path: PathBuf,
     pub dcd_bin_path: PathBuf,
+    pub remote_workdir: String,
 }
 
 impl TestProject {
     /// Create a new test project with given compose and env file contents
-    pub async fn new(compose_content: &str, env_content: &str) -> Self {
+    pub async fn new(compose_content: &str, env_content: &str, remote_workdir: &str) -> Self {
         // Use compile-time manifest directory to locate sources
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         // Path to the built dcd binary
@@ -173,6 +177,82 @@ impl TestProject {
             compose_path,
             env_path,
             dcd_bin_path: dcd_dest,
+            remote_workdir: remote_workdir.to_string(),
+        }
+    }
+
+    /// Destroys the deployment and verifies that specified container names (substrings) are gone.
+    pub async fn destroy(
+        &self,
+        target_param: &str,
+        ssh_port: u16,
+        expected_absent_container_substrings: &[&str],
+    ) {
+        let mut cmd_destroy = Command::new(&self.dcd_bin_path);
+        cmd_destroy.current_dir(&self.project_dir).args([
+            "-f",
+            self.compose_path.to_str().unwrap(),
+            "-e",
+            self.env_path.to_str().unwrap(),
+            "-i",
+            "test_ssh_key", // Relative to project_dir
+            "-w",
+            &self.remote_workdir,
+            "destroy",
+            "--force",
+            target_param,
+        ]);
+
+        let output_destroy = cmd_destroy
+            .output()
+            .await
+            .expect("Failed to execute DCD destroy command from TestProject");
+
+        assert!(
+            output_destroy.status.success(),
+            "DCD destroy command failed (from TestProject): stderr: {}, stdout: {}",
+            String::from_utf8_lossy(&output_destroy.stderr),
+            String::from_utf8_lossy(&output_destroy.stdout)
+        );
+
+        let stdout_destroy = String::from_utf8_lossy(&output_destroy.stdout);
+        let stderr_destroy = String::from_utf8_lossy(&output_destroy.stderr);
+        assert!(
+            stdout_destroy.contains("Deployment destroyed successfully")
+                || stderr_destroy.contains("Deployment destroyed successfully"),
+            "Unexpected destroy output (from TestProject):\n--- STDOUT ---\n{}\n--- STDERR ---\n{}",
+            stdout_destroy,
+            stderr_destroy
+        );
+
+        // Verify all specified containers are gone
+        sleep(Duration::from_secs(5)).await; // Give time for containers to be removed
+
+        let ssh_key_path = self.project_dir.join("test_ssh_key");
+        let ps_after_destroy_output = ssh_cmd(
+            ssh_port,
+            ssh_key_path.to_str().unwrap(),
+            "root@localhost", // Assumes SSH server is on localhost for the test runner
+            &["docker", "ps", "--format", "{{.Names}}", "-a"],
+        )
+        .output()
+        .await
+        .expect("SSH docker ps failed (after destroy, from TestProject)");
+
+        assert!(
+            ps_after_destroy_output.status.success(),
+            "SSH docker ps command failed (after destroy, from TestProject): stderr: {}",
+            String::from_utf8_lossy(&ps_after_destroy_output.stderr)
+        );
+
+        let ps_stdout_after_destroy = String::from_utf8_lossy(&ps_after_destroy_output.stdout);
+        for name_substring in expected_absent_container_substrings {
+            assert!(
+                !ps_stdout_after_destroy.contains(name_substring),
+                "Container substring '{}' still present after destroy (from TestProject): {}",
+                name_substring,
+                ps_stdout_after_destroy
+            );
         }
     }
 }
