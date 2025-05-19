@@ -1,4 +1,5 @@
 use std::time::Duration;
+use tokio::fs;
 use tokio::process::Command;
 use tokio::time::sleep;
 
@@ -303,6 +304,293 @@ async fn test_dcd_up_with_env_and_defaults() {
         destroy_output.status.success(),
         "DCD destroy command failed: {}",
         String::from_utf8_lossy(&destroy_output.stderr)
+    );
+
+    container.stop().await.unwrap();
+}
+
+#[cfg(feature = "integration-tests")]
+#[tokio::test]
+async fn test_dcd_redeploy_with_changes() {
+    let (container, ssh_port) = start_ssh_server().await;
+    let _dcd_path = build_dcd_binary(); // Ensure binary is built
+
+    // Initial project setup
+    let initial_compose_content = [
+        "version: '3'",
+        "services:",
+        "  service1:",
+        "    image: busybox:latest",
+        "    container_name: service1_redeploy",
+        "    command: [\"sh\", \"-c\", \"sleep 3600\"]",
+        "    environment:",
+        "      - MY_VAR=${MY_VAR}",
+    ]
+    .join("\n");
+    let initial_env_content = "MY_VAR=initial_value\n";
+    let project = TestProject::new(&initial_compose_content, initial_env_content).await;
+    let target = format!("root@localhost:{}", ssh_port);
+    let remote_workdir = "/opt/test_dcd_redeploy";
+
+    // --- First Deployment ---
+    let mut cmd_up1 = Command::new(&project.dcd_bin_path);
+    cmd_up1.current_dir(&project.project_dir).args([
+        "-f",
+        project.compose_path.to_str().unwrap(),
+        "-e",
+        project.env_path.to_str().unwrap(),
+        "-i",
+        "test_ssh_key", // Relative to project_dir
+        "-w",
+        remote_workdir,
+        "up",
+        "--no-health-check",
+        &target,
+    ]);
+
+    let output_up1 = cmd_up1
+        .output()
+        .await
+        .expect("Failed to execute DCD up command (1st deploy)");
+    assert!(
+        output_up1.status.success(),
+        "DCD up command failed (1st deploy): stderr: {}, stdout: {}",
+        String::from_utf8_lossy(&output_up1.stderr),
+        String::from_utf8_lossy(&output_up1.stdout)
+    );
+    let stdout_up1 = String::from_utf8_lossy(&output_up1.stdout);
+    let stderr_up1 = String::from_utf8_lossy(&output_up1.stderr);
+    assert!(
+        stdout_up1.contains("Deployment successful")
+            || stderr_up1.contains("Deployment successful"),
+        "Unexpected output (1st deploy):\n--- STDOUT ---\n{}\n--- STDERR ---\n{}",
+        stdout_up1,
+        stderr_up1
+    );
+
+    sleep(Duration::from_secs(5)).await; // Allow time for containers to start
+
+    // Verify service1 after 1st deploy
+    let ps_output1 = ssh_cmd(
+        ssh_port,
+        "tests/test_ssh_key",
+        "root@localhost",
+        &["docker", "ps", "--format", "{{.Names}}"],
+    )
+    .output()
+    .await
+    .expect("SSH docker ps failed (after 1st deploy)");
+    assert!(
+        ps_output1.status.success(),
+        "SSH docker ps command failed (after 1st deploy)"
+    );
+    let ps_stdout1 = String::from_utf8_lossy(&ps_output1.stdout);
+    assert!(
+        ps_stdout1
+            .lines()
+            .any(|name| name.trim() == "service1_redeploy"),
+        "service1_redeploy not found after 1st deploy: {}",
+        ps_stdout1
+    );
+
+    let env_output1 = ssh_cmd(
+        ssh_port,
+        "tests/test_ssh_key",
+        "root@localhost",
+        &["docker", "exec", "service1_redeploy", "env"],
+    )
+    .output()
+    .await
+    .expect("SSH docker exec env failed (service1, 1st deploy)");
+    assert!(
+        env_output1.status.success(),
+        "SSH docker exec env command failed (service1, 1st deploy)"
+    );
+    let env_stdout1 = String::from_utf8_lossy(&env_output1.stdout);
+    assert!(
+        env_stdout1.contains("MY_VAR=initial_value"),
+        "MY_VAR not 'initial_value' in service1 after 1st deploy: {}",
+        env_stdout1
+    );
+
+    // --- Prepare for Redeployment ---
+    // Modify docker-compose.yml: add service2, keep service1
+    let updated_compose_content = [
+        "version: '3'",
+        "services:",
+        "  service1:",
+        "    image: busybox:latest", // Definition can remain the same or change
+        "    container_name: service1_redeploy",
+        "    command: [\"sh\", \"-c\", \"sleep 3600\"]",
+        "    environment:",
+        "      - MY_VAR=${MY_VAR}", // This will pick up the new .env value
+        "  service2:",              // Add service2
+        "    image: busybox:latest",
+        "    container_name: service2_redeploy",
+        "    command: [\"sh\", \"-c\", \"sleep 3600\"]",
+    ]
+    .join("\n");
+    fs::write(&project.compose_path, updated_compose_content)
+        .await
+        .expect("Failed to write updated docker-compose.yml");
+
+    // Modify .env: change MY_VAR
+    let updated_env_content = "MY_VAR=updated_value\n";
+    fs::write(&project.env_path, updated_env_content)
+        .await
+        .expect("Failed to write updated .env file");
+
+    // --- Second Deployment (Redeploy) ---
+    let mut cmd_up2 = Command::new(&project.dcd_bin_path);
+    cmd_up2.current_dir(&project.project_dir).args([
+        "-f",
+        project.compose_path.to_str().unwrap(), // Use updated compose
+        "-e",
+        project.env_path.to_str().unwrap(), // Use updated env
+        "-i",
+        "test_ssh_key",
+        "-w",
+        remote_workdir,
+        "up",
+        "--no-health-check",
+        &target,
+    ]);
+
+    let output_up2 = cmd_up2
+        .output()
+        .await
+        .expect("Failed to execute DCD up command (redeploy)");
+    assert!(
+        output_up2.status.success(),
+        "DCD up command failed (redeploy): stderr: {}, stdout: {}",
+        String::from_utf8_lossy(&output_up2.stderr),
+        String::from_utf8_lossy(&output_up2.stdout)
+    );
+    let stdout_up2 = String::from_utf8_lossy(&output_up2.stdout);
+    let stderr_up2 = String::from_utf8_lossy(&output_up2.stderr);
+    assert!(
+        stdout_up2.contains("Deployment successful")
+            || stderr_up2.contains("Deployment successful"),
+        "Unexpected output (redeploy):\n--- STDOUT ---\n{}\n--- STDERR ---\n{}",
+        stdout_up2,
+        stderr_up2
+    );
+
+    sleep(Duration::from_secs(10)).await; // Allow more time for compose to reconcile changes
+
+    // Verify after redeploy
+    let ps_output2 = ssh_cmd(
+        ssh_port,
+        "tests/test_ssh_key",
+        "root@localhost",
+        &["docker", "ps", "--format", "{{.Names}}"],
+    )
+    .output()
+    .await
+    .expect("SSH docker ps failed (after redeploy)");
+    assert!(
+        ps_output2.status.success(),
+        "SSH docker ps command failed (after redeploy)"
+    );
+    let ps_stdout2 = String::from_utf8_lossy(&ps_output2.stdout);
+
+    // Check service1 (still running, env updated)
+    assert!(
+        ps_stdout2
+            .lines()
+            .any(|name| name.trim() == "service1_redeploy"),
+        "service1_redeploy not found after redeploy: {}",
+        ps_stdout2
+    );
+    let env_output2_service1 = ssh_cmd(
+        ssh_port,
+        "tests/test_ssh_key",
+        "root@localhost",
+        &["docker", "exec", "service1_redeploy", "env"],
+    )
+    .output()
+    .await
+    .expect("SSH docker exec env failed (service1, redeploy)");
+    assert!(
+        env_output2_service1.status.success(),
+        "SSH docker exec env command failed (service1, redeploy)"
+    );
+    let env_stdout2_service1 = String::from_utf8_lossy(&env_output2_service1.stdout);
+    assert!(
+        env_stdout2_service1.contains("MY_VAR=updated_value"),
+        "MY_VAR not 'updated_value' in service1 after redeploy: {}",
+        env_stdout2_service1
+    );
+
+    // Check service2 (newly added)
+    assert!(
+        ps_stdout2
+            .lines()
+            .any(|name| name.trim() == "service2_redeploy"),
+        "service2_redeploy not found after redeploy: {}",
+        ps_stdout2
+    );
+
+    // --- Teardown ---
+    let mut cmd_destroy = Command::new(&project.dcd_bin_path);
+    cmd_destroy.current_dir(&project.project_dir).args([
+        "-f",
+        project.compose_path.to_str().unwrap(), // Use the latest compose file for destroy
+        "-e",
+        project.env_path.to_str().unwrap(),
+        "-i",
+        "test_ssh_key",
+        "-w",
+        remote_workdir,
+        "destroy",
+        "--force",
+        &target,
+    ]);
+    let output_destroy = cmd_destroy
+        .output()
+        .await
+        .expect("Failed to execute DCD destroy command");
+    assert!(
+        output_destroy.status.success(),
+        "DCD destroy command failed: stderr: {}, stdout: {}",
+        String::from_utf8_lossy(&output_destroy.stderr),
+        String::from_utf8_lossy(&output_destroy.stdout)
+    );
+    let stdout_destroy = String::from_utf8_lossy(&output_destroy.stdout);
+    let stderr_destroy = String::from_utf8_lossy(&output_destroy.stderr);
+    assert!(
+        stdout_destroy.contains("Deployment destroyed successfully")
+            || stderr_destroy.contains("Deployment destroyed successfully"),
+        "Unexpected destroy output:\n--- STDOUT ---\n{}\n--- STDERR ---\n{}",
+        stdout_destroy,
+        stderr_destroy
+    );
+
+    // Verify all containers are gone
+    sleep(Duration::from_secs(5)).await;
+    let ps_after_destroy = ssh_cmd(
+        ssh_port,
+        "tests/test_ssh_key",
+        "root@localhost",
+        &["docker", "ps", "--format", "{{.Names}}", "-a"],
+    ) // -a to see all containers, even stopped
+    .output()
+    .await
+    .expect("SSH docker ps failed (after destroy)");
+    assert!(
+        ps_after_destroy.status.success(),
+        "SSH docker ps command failed (after destroy)"
+    );
+    let ps_stdout_after_destroy = String::from_utf8_lossy(&ps_after_destroy.stdout);
+    assert!(
+        !ps_stdout_after_destroy.contains("service1_redeploy"),
+        "service1_redeploy still present after destroy: {}",
+        ps_stdout_after_destroy
+    );
+    assert!(
+        !ps_stdout_after_destroy.contains("service2_redeploy"),
+        "service2_redeploy still present after destroy: {}",
+        ps_stdout_after_destroy
     );
 
     container.stop().await.unwrap();
