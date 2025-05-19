@@ -5,6 +5,7 @@ use tokio::time::sleep;
 mod common;
 use common::{build_dcd_binary, ssh_cmd, start_ssh_server, TestProject};
 
+#[cfg(feature = "integration-tests")]
 #[tokio::test]
 async fn test_ssh_server() {
     let (container, host_port) = start_ssh_server().await;
@@ -37,6 +38,7 @@ async fn test_ssh_server() {
     container.stop().await.unwrap();
 }
 
+#[cfg(feature = "integration-tests")]
 #[tokio::test]
 async fn test_dcd_up() {
     let (container, ssh_port) = start_ssh_server().await;
@@ -171,6 +173,7 @@ async fn test_dcd_up() {
 }
 
 // Test deploying a container with environment variables from .env file, system env, and defaults
+#[cfg(feature = "integration-tests")]
 #[tokio::test]
 async fn test_dcd_up_with_env_and_defaults() {
     let (container, ssh_port) = start_ssh_server().await;

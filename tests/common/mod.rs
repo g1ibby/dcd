@@ -114,15 +114,15 @@ pub fn build_dcd_binary() -> PathBuf {
         .status()
         .expect("Failed to execute cargo build");
     assert!(build_status.success(), "cargo build failed");
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    PathBuf::from(manifest_dir)
-        .join("target")
-        .join("debug")
-        .join("dcd")
+    // Use compile-time manifest directory to locate the built binary
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    manifest_dir.join("target").join("debug").join("dcd")
 }
 
 /// A test project context with prepared files
 pub struct TestProject {
+    // Keep TempDir alive to prevent removing the directory prematurely
+    _temp_dir: TempDir,
     pub project_dir: PathBuf,
     pub compose_path: PathBuf,
     pub env_path: PathBuf,
@@ -132,11 +132,10 @@ pub struct TestProject {
 impl TestProject {
     /// Create a new test project with given compose and env file contents
     pub async fn new(compose_content: &str, env_content: &str) -> Self {
-        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-        let dcd_source = PathBuf::from(&manifest_dir)
-            .join("target")
-            .join("debug")
-            .join("dcd");
+        // Use compile-time manifest directory to locate sources
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        // Path to the built dcd binary
+        let dcd_source = manifest_dir.join("target").join("debug").join("dcd");
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let project_dir = temp_dir.path().to_path_buf();
 
@@ -150,8 +149,9 @@ impl TestProject {
             .await
             .expect("Failed to write .env file");
 
-        let ssh_key_source = PathBuf::from(&manifest_dir).join("tests/test_ssh_key");
-        let ssh_pub_source = PathBuf::from(&manifest_dir).join("tests/test_ssh_key.pub");
+        // Paths to SSH keys for tests
+        let ssh_key_source = manifest_dir.join("tests/test_ssh_key");
+        let ssh_pub_source = manifest_dir.join("tests/test_ssh_key.pub");
         let ssh_key_dest = project_dir.join("test_ssh_key");
         let ssh_pub_dest = project_dir.join("test_ssh_key.pub");
 
@@ -168,6 +168,7 @@ impl TestProject {
             .expect("Failed to copy dcd binary");
 
         TestProject {
+            _temp_dir: temp_dir,
             project_dir,
             compose_path,
             env_path,

@@ -37,6 +37,17 @@ if git diff --cached --name-only | grep -q '^src/'; then
     echo "Clippy checks OK."
   fi
 
+  # 3. Run tests
+  if [ $EXIT_CODE -eq 0 ]; then # Only run tests if previous steps passed
+    echo "Running tests (including integration-tests feature)..."
+    if ! cargo test --all-features; then
+      echo "Tests failed. Please fix the issues manually."
+      EXIT_CODE=1
+    else
+      echo "Tests passed."
+    fi
+  fi
+
   if [ $EXIT_CODE -eq 0 ]; then
     echo "Rust checks passed successfully."
   else
