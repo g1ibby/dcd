@@ -123,7 +123,6 @@ pub fn build_dcd_binary() -> PathBuf {
 
 /// A test project context with prepared files
 pub struct TestProject {
-    pub temp_dir: TempDir,
     pub project_dir: PathBuf,
     pub compose_path: PathBuf,
     pub env_path: PathBuf,
@@ -169,7 +168,6 @@ impl TestProject {
             .expect("Failed to copy dcd binary");
 
         TestProject {
-            temp_dir,
             project_dir,
             compose_path,
             env_path,
