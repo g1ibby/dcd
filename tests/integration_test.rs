@@ -1,39 +1,13 @@
 use std::time::Duration;
-use tempfile::TempDir;
-use testcontainers::{
-    core::{IntoContainerPort, Mount},
-    runners::AsyncRunner,
-    ImageExt,
-};
-use tokio::fs;
 use tokio::process::Command;
 use tokio::time::sleep;
 
 mod common;
-use common::{ssh_cmd, SshServer};
+use common::{build_dcd_binary, ssh_cmd, start_ssh_server, TestProject};
 
 #[tokio::test]
 async fn test_ssh_server() {
-    // Start SSH server container
-    let container = SshServer
-        .with_mapped_port(0, 22.tcp())
-        .with_mount(Mount::bind_mount(
-            "/var/run/docker.sock",
-            "/var/run/docker.sock",
-        ))
-        .start()
-        .await
-        .expect("failed to start SSH container");
-
-    // Verify SSH port is mapped
-    let host_port = container
-        .get_host_port_ipv4(22)
-        .await
-        .expect("SSH port not mapped");
-    assert!(
-        host_port > 0,
-        "SSH server port mapping should be a positive port"
-    );
+    let (container, host_port) = start_ssh_server().await;
 
     // Try SSH connection with key-based authentication
     let status = ssh_cmd(
@@ -60,45 +34,17 @@ async fn test_ssh_server() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert_eq!(stdout.trim(), "hello");
 
-    // Stop the container
     container.stop().await.unwrap();
 }
 
 #[tokio::test]
 async fn test_dcd_up() {
-    // Start SSH server container
-    let container = SshServer
-        .with_mapped_port(0, 22.tcp())
-        .with_mount(Mount::bind_mount(
-            "/var/run/docker.sock",
-            "/var/run/docker.sock",
-        ))
-        .start()
-        .await
-        .expect("failed to start SSH container");
-    let ssh_port = container
-        .get_host_port_ipv4(22)
-        .await
-        .expect("SSH port not mapped");
+    let (container, ssh_port) = start_ssh_server().await;
 
     // Build the project's binary
-    let build_status = std::process::Command::new("cargo")
-        .arg("build")
-        .status()
-        .expect("Failed to execute cargo build");
-    assert!(build_status.success(), "cargo build failed");
-
-    // Determine the path to the built binary
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let dcd_binary_source_path = std::path::PathBuf::from(manifest_dir.clone())
-        .join("target")
-        .join("debug")
-        .join("dcd");
+    let _dcd_path = build_dcd_binary();
 
     // Prepare temporary project directory with a simple nginx compose file
-    let temp_dir = TempDir::new().expect("Failed to create temp dir");
-    let project_dir = temp_dir.path();
-    let compose_path = project_dir.join("docker-compose.yml");
     let compose_content = [
         "version: '3'",
         "services:",
@@ -108,54 +54,26 @@ async fn test_dcd_up() {
         "      - \"8080:80\"",
     ]
     .join("\n");
-    fs::write(&compose_path, compose_content)
-        .await
-        .expect("Failed to write docker-compose.yml");
-
-    // Create an empty .env file
-    let env_path = project_dir.join(".env");
-    fs::write(&env_path, "")
-        .await
-        .expect("Failed to write .env file");
-
-    // Copy SSH keys to the project directory
-    let ssh_key_source_path = std::path::PathBuf::from(&manifest_dir).join("tests/test_ssh_key");
-    let ssh_key_pub_source_path =
-        std::path::PathBuf::from(&manifest_dir).join("tests/test_ssh_key.pub");
-
-    let ssh_key_dest_path = project_dir.join("test_ssh_key");
-    let ssh_key_pub_dest_path = project_dir.join("test_ssh_key.pub");
-
-    fs::copy(&ssh_key_source_path, &ssh_key_dest_path)
-        .await
-        .expect("Failed to copy SSH private key to project_dir");
-    fs::copy(&ssh_key_pub_source_path, &ssh_key_pub_dest_path)
-        .await
-        .expect("Failed to copy SSH public key to project_dir");
-
-    // Copy the dcd binary to the project directory
-    let dcd_binary_dest_path = project_dir.join("dcd");
-    fs::copy(&dcd_binary_source_path, &dcd_binary_dest_path)
-        .await
-        .expect("Failed to copy dcd binary to project_dir");
+    let project = TestProject::new(&compose_content, "").await;
 
     // Run the DCD up command to deploy nginx
     let target = format!("root@localhost:{}", ssh_port);
-    let mut cmd = Command::new(&dcd_binary_dest_path);
-    cmd.current_dir(project_dir); // Run from within project_dir
-    cmd.env("SYSTEM_VAR", "sys_val").args([
-        "-f",
-        compose_path.to_str().unwrap(),
-        "-e",
-        env_path.to_str().unwrap(),
-        "-i",
-        "test_ssh_key",
-        "-w",
-        "/opt/test_dcd_up",
-        "up",
-        "--no-health-check",
-        &target,
-    ]);
+    let mut cmd = Command::new(&project.dcd_bin_path);
+    cmd.current_dir(&project.project_dir)
+        .env("SYSTEM_VAR", "sys_val")
+        .args([
+            "-f",
+            project.compose_path.to_str().unwrap(),
+            "-e",
+            project.env_path.to_str().unwrap(),
+            "-i",
+            "test_ssh_key",
+            "-w",
+            "/opt/test_dcd_up",
+            "up",
+            "--no-health-check",
+            &target,
+        ]);
     let output = cmd
         .output()
         .await
@@ -195,16 +113,16 @@ async fn test_dcd_up() {
         ps_stdout
     );
 
-    // --- Teardown deployment via 'destroy' ---
+    // Teardown deployment via 'destroy'
     let destroy_output = Command::new("cargo")
         .args([
             "run",
             "-q",
             "--",
             "-f",
-            compose_path.to_str().unwrap(),
+            project.compose_path.to_str().unwrap(),
             "-e",
-            env_path.to_str().unwrap(),
+            project.env_path.to_str().unwrap(),
             "-i",
             "tests/test_ssh_key",
             "-w",
@@ -255,41 +173,11 @@ async fn test_dcd_up() {
 // Test deploying a container with environment variables from .env file, system env, and defaults
 #[tokio::test]
 async fn test_dcd_up_with_env_and_defaults() {
-    // --- Setup: Build the dcd binary ---
-    // Start SSH server container
-    let container = SshServer
-        .with_mapped_port(0, 22.tcp())
-        .with_mount(Mount::bind_mount(
-            "/var/run/docker.sock",
-            "/var/run/docker.sock",
-        ))
-        .start()
-        .await
-        .expect("failed to start SSH container");
-    let ssh_port = container
-        .get_host_port_ipv4(22)
-        .await
-        .expect("SSH port not mapped");
+    let (container, ssh_port) = start_ssh_server().await;
 
     // Build the project's binary
-    let build_status = std::process::Command::new("cargo")
-        .arg("build")
-        .status()
-        .expect("Failed to execute cargo build");
-    assert!(build_status.success(), "cargo build failed");
+    let _dcd_path = build_dcd_binary();
 
-    // Determine the path to the built binary
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let dcd_binary_source_path = std::path::PathBuf::from(manifest_dir.clone())
-        .join("target")
-        .join("debug")
-        .join("dcd");
-
-    // Prepare temporary project directory
-    let temp_dir = TempDir::new().expect("Failed to create temp dir");
-    let project_dir = temp_dir.path();
-    // Write docker-compose.yml with env vars and default
-    let compose_path = project_dir.join("docker-compose.yml");
     let compose_content = [
         "version: '3'",
         "services:",
@@ -303,54 +191,27 @@ async fn test_dcd_up_with_env_and_defaults() {
         "      - DEFAULT_VAR=${DEFAULT_VAR:-def123}",
     ]
     .join("\n");
-    fs::write(&compose_path, compose_content)
-        .await
-        .expect("Failed to write docker-compose.yml");
-
-    // Write .env file with FILE_VAR
-    let env_path = project_dir.join(".env");
-    fs::write(&env_path, "FILE_VAR=file_val\n")
-        .await
-        .expect("Failed to write .env file");
-
-    // Copy SSH keys to the project directory
-    let ssh_key_source_path = std::path::PathBuf::from(&manifest_dir).join("tests/test_ssh_key");
-    let ssh_key_pub_source_path =
-        std::path::PathBuf::from(&manifest_dir).join("tests/test_ssh_key.pub");
-
-    let ssh_key_dest_path = project_dir.join("test_ssh_key");
-    let ssh_key_pub_dest_path = project_dir.join("test_ssh_key.pub");
-
-    fs::copy(&ssh_key_source_path, &ssh_key_dest_path)
-        .await
-        .expect("Failed to copy SSH private key to project_dir");
-    fs::copy(&ssh_key_pub_source_path, &ssh_key_pub_dest_path)
-        .await
-        .expect("Failed to copy SSH public key to project_dir");
-
-    // Copy the dcd binary to the project directory
-    let dcd_binary_dest_path = project_dir.join("dcd");
-    fs::copy(&dcd_binary_source_path, &dcd_binary_dest_path)
-        .await
-        .expect("Failed to copy dcd binary to project_dir");
+    let env_content = "FILE_VAR=file_val\n";
+    let project = TestProject::new(&compose_content, env_content).await;
 
     // Run the DCD up command with --no-health-check, setting SYSTEM_VAR in environment
     let target = format!("root@localhost:{}", ssh_port);
-    let mut cmd = Command::new(&dcd_binary_dest_path);
-    cmd.current_dir(project_dir); // Run from within project_dir
-    cmd.env("SYSTEM_VAR", "sys_val").args([
-        "-f",
-        compose_path.to_str().unwrap(),
-        "-e",
-        env_path.to_str().unwrap(),
-        "-i",
-        "test_ssh_key",
-        "-w",
-        "/opt/test_dcd_up_with_env_and_defaults",
-        "up",
-        "--no-health-check",
-        &target,
-    ]);
+    let mut cmd = Command::new(&project.dcd_bin_path);
+    cmd.current_dir(&project.project_dir)
+        .env("SYSTEM_VAR", "sys_val")
+        .args([
+            "-f",
+            project.compose_path.to_str().unwrap(),
+            "-e",
+            project.env_path.to_str().unwrap(),
+            "-i",
+            "test_ssh_key",
+            "-w",
+            "/opt/test_dcd_up_with_env_and_defaults",
+            "up",
+            "--no-health-check",
+            &target,
+        ]);
     let output = cmd
         .output()
         .await
@@ -360,10 +221,8 @@ async fn test_dcd_up_with_env_and_defaults() {
         "DCD up command failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    // The success message may be logged to stderr or stdout
     assert!(
         stdout.contains("Deployment successful") || stderr.contains("Deployment successful"),
         "Unexpected output:\n--- STDOUT ---\n{}\n--- STDERR ---\n{}",
@@ -419,13 +278,13 @@ async fn test_dcd_up_with_env_and_defaults() {
     );
 
     // Teardown deployment via 'destroy'
-    let destroy_output = Command::new(&dcd_binary_dest_path)
-        .current_dir(project_dir)
+    let destroy_output = Command::new(&project.dcd_bin_path)
+        .current_dir(&project.project_dir)
         .args([
             "-f",
-            compose_path.to_str().unwrap(),
+            project.compose_path.to_str().unwrap(),
             "-e",
-            env_path.to_str().unwrap(),
+            project.env_path.to_str().unwrap(),
             "-i",
             "test_ssh_key",
             "-w",
@@ -443,6 +302,5 @@ async fn test_dcd_up_with_env_and_defaults() {
         String::from_utf8_lossy(&destroy_output.stderr)
     );
 
-    // Stop helper container
     container.stop().await.unwrap();
 }

@@ -1,5 +1,13 @@
 use std::borrow::Cow;
+use std::path::PathBuf;
+use tempfile::TempDir;
 use testcontainers::core::{Image, WaitFor};
+use testcontainers::{
+    core::{IntoContainerPort, Mount},
+    runners::AsyncRunner,
+    ContainerAsync, ImageExt,
+};
+use tokio::fs;
 
 /// Public key for SSH key-based authentication, read from test_ssh_key.pub.
 pub const AUTHORIZED_KEY: &str = include_str!("../test_ssh_key.pub");
@@ -81,4 +89,91 @@ pub fn ssh_cmd(
     }
     cmd
 }
+/// Start SSH server container and return container and mapped host port
+pub async fn start_ssh_server() -> (ContainerAsync<SshServer>, u16) {
+    let container = SshServer
+        .with_mapped_port(0, 22.tcp())
+        .with_mount(Mount::bind_mount(
+            "/var/run/docker.sock",
+            "/var/run/docker.sock",
+        ))
+        .start()
+        .await
+        .expect("failed to start SSH container");
+    let port = container
+        .get_host_port_ipv4(22)
+        .await
+        .expect("SSH port not mapped");
+    (container, port)
+}
 
+/// Build the dcd binary and return its path
+pub fn build_dcd_binary() -> PathBuf {
+    let build_status = std::process::Command::new("cargo")
+        .arg("build")
+        .status()
+        .expect("Failed to execute cargo build");
+    assert!(build_status.success(), "cargo build failed");
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    PathBuf::from(manifest_dir)
+        .join("target")
+        .join("debug")
+        .join("dcd")
+}
+
+/// A test project context with prepared files
+pub struct TestProject {
+    pub temp_dir: TempDir,
+    pub project_dir: PathBuf,
+    pub compose_path: PathBuf,
+    pub env_path: PathBuf,
+    pub dcd_bin_path: PathBuf,
+}
+
+impl TestProject {
+    /// Create a new test project with given compose and env file contents
+    pub async fn new(compose_content: &str, env_content: &str) -> Self {
+        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+        let dcd_source = PathBuf::from(&manifest_dir)
+            .join("target")
+            .join("debug")
+            .join("dcd");
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let project_dir = temp_dir.path().to_path_buf();
+
+        let compose_path = project_dir.join("docker-compose.yml");
+        fs::write(&compose_path, compose_content)
+            .await
+            .expect("Failed to write docker-compose.yml");
+
+        let env_path = project_dir.join(".env");
+        fs::write(&env_path, env_content)
+            .await
+            .expect("Failed to write .env file");
+
+        let ssh_key_source = PathBuf::from(&manifest_dir).join("tests/test_ssh_key");
+        let ssh_pub_source = PathBuf::from(&manifest_dir).join("tests/test_ssh_key.pub");
+        let ssh_key_dest = project_dir.join("test_ssh_key");
+        let ssh_pub_dest = project_dir.join("test_ssh_key.pub");
+
+        fs::copy(&ssh_key_source, &ssh_key_dest)
+            .await
+            .expect("Failed to copy SSH private key");
+        fs::copy(&ssh_pub_source, &ssh_pub_dest)
+            .await
+            .expect("Failed to copy SSH public key");
+
+        let dcd_dest = project_dir.join("dcd");
+        fs::copy(&dcd_source, &dcd_dest)
+            .await
+            .expect("Failed to copy dcd binary");
+
+        TestProject {
+            temp_dir,
+            project_dir,
+            compose_path,
+            env_path,
+            dcd_bin_path: dcd_dest,
+        }
+    }
+}
