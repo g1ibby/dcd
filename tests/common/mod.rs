@@ -11,6 +11,7 @@ use testcontainers::{
 use tokio::fs;
 use tokio::process::Command;
 use tokio::time::sleep;
+use lazy_static::lazy_static;
 
 /// Public key for SSH key-based authentication, read from test_ssh_key.pub.
 pub const AUTHORIZED_KEY: &str = include_str!("../test_ssh_key.pub");
@@ -110,16 +111,20 @@ pub async fn start_ssh_server() -> (ContainerAsync<SshServer>, u16) {
     (container, port)
 }
 
-/// Build the dcd binary and return its path
+/// Build the dcd binary and return its path (cached; built only once)
 pub fn build_dcd_binary() -> PathBuf {
-    let build_status = std::process::Command::new("cargo")
-        .arg("build")
-        .status()
-        .expect("Failed to execute cargo build");
-    assert!(build_status.success(), "cargo build failed");
-    // Use compile-time manifest directory to locate the built binary
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest_dir.join("target").join("debug").join("dcd")
+    lazy_static! {
+        static ref DCD_PATH: PathBuf = {
+            let build_status = std::process::Command::new("cargo")
+                .arg("build")
+                .status()
+                .expect("Failed to execute cargo build");
+            assert!(build_status.success(), "cargo build failed");
+            let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            manifest_dir.join("target").join("debug").join("dcd")
+        };
+    }
+    DCD_PATH.clone()
 }
 
 /// A test project context with prepared files
