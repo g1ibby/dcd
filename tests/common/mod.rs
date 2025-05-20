@@ -1,3 +1,4 @@
+use lazy_static::lazy_static;
 use std::borrow::Cow;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -11,7 +12,6 @@ use testcontainers::{
 use tokio::fs;
 use tokio::process::Command;
 use tokio::time::sleep;
-use lazy_static::lazy_static;
 
 /// Public key for SSH key-based authentication, read from test_ssh_key.pub.
 pub const AUTHORIZED_KEY: &str = include_str!("../test_ssh_key.pub");

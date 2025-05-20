@@ -10,7 +10,7 @@ if git diff --cached --name-only | grep -q '^src/'; then
 
   # 1. Check formatting
   echo "Checking formatting..."
-  if ! cargo fmt -- --check; then
+  if ! cargo fmt --all -- --check; then
     echo "Formatting issues found. Attempting to auto-fix..."
     cargo fmt
     # Stage the formatted files that were already staged
