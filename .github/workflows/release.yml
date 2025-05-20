@@ -119,7 +119,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: linux-binary
-          path: .github/actions/dcd-deploy
+          path: dcd-deploy
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
