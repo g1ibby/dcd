@@ -127,7 +127,7 @@ DCD is also available as a GitHub Action for deploying your Docker Compose appli
 
 ```yaml
 - name: Deploy with DCD
-  uses: g1ibby/dcd-deploy@v1
+  uses: g1ibby/dcd/dcd-deploy@v1
   with:
     command: up
     target: ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} # Combine user and host
@@ -171,7 +171,7 @@ jobs:
       - uses: actions/checkout@v4
       
       - name: Deploy to production
-        uses: g1ibby/dcd-deploy@v1
+        uses: g1ibby/dcd/dcd-deploy@v1
         with:
           command: 'up' # Explicitly set command
           target: ${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}

@@ -32,7 +32,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Deploy with DCD
-        uses: ./.github/actions/dcd-deploy
+        uses: ./dcd-deploy
         with:
           command: ${{ github.event.inputs.command }}
           compose_files: "docker-compose.yml docker-compose.${{ github.event.inputs.environment }}.yml"
