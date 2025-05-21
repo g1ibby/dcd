@@ -183,6 +183,61 @@ jobs:
 
 See the [example workflow](.github/workflows/example-deploy.yml) for a more complete example.
 
+### Using Environment Variables in with: Inputs
+
+Instead of repeating secrets directly in your `with:` block, you can scope them at the job or environment level and reference via `${{ env.VAR }}` or `${{ secrets.VAR }}` in your inputs.
+
+1) Define at the job or step level:
+
+```yaml
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      REMOTE_DIR: /opt/homellm
+      # You can also set arbitrary vars here:
+      POSTGRES_DB_PASS: ${{ secrets.POSTGRES_DB_PASS }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Deploy with DCD
+        uses: g1ibby/dcd/dcd-deploy@main
+        with:
+          host: ${{ env.DEPLOY_HOST }}
+          port: ${{ env.DEPLOY_PORT }}
+          user: ${{ env.DEPLOY_USER }}
+          ssh_private_key: ${{ env.SSH_PRIVATE_KEY }}
+          remote_dir: ${{ env.REMOTE_DIR }}
+          compose_files: docker-compose.yaml
+          env_files: .env
+```
+
+Any additional environment variables you define in the `env:` block (e.g. `POSTGRES_DB_PASS`) are passed into the DCD action container. DCD inspects your Docker Compose files for variable references (`${VAR}`), sources those values from its process environment, and generates a `.env.dcd` file containing only the consumed variables. That file is then synchronized to the remote host, ensuring your services have the correct values at runtime.
+
+2) Use GitHub Environments to scope secrets by environment:
+
+```yaml
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production   # loads secrets scoped to the 'production' environment
+    steps:
+      - uses: actions/checkout@v3
+      - name: Deploy with DCD
+        uses: g1ibby/dcd/dcd-deploy@main
+        with:
+          host: ${{ secrets.HOST }}
+          port: ${{ secrets.PORT }}
+          user: ${{ secrets.SSH_USER }}
+          ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
+          remote_dir: ${{ secrets.REMOTE_DIR }}
+          compose_files: docker-compose.yaml
+          env_files: .env
+```
+
 
 ## Releasing
 

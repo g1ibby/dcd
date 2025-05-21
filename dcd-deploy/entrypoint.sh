@@ -121,11 +121,8 @@ if [ -n "$ENV_FILES_STR" ]; then
   done
 fi
 
-# Add common options
-ARGS+=("-H" "$HOST")
-ARGS+=("--port" "$PORT")
-ARGS+=("-u" "$USER")
-ARGS+=("-i" "$KEY_FILE") # Use the key file we created
+# Add common options (identity file and working directory)
+ARGS+=("-i" "$KEY_FILE")
 ARGS+=("-w" "$REMOTE_DIR")
 
 # Add the main command
@@ -139,9 +136,16 @@ if [ "$DCD_COMMAND" == "destroy" ] && [ "$FORCE" == "true" ]; then
   ARGS+=("--force")
 fi
 
+# Add target argument for remote commands (up, status, destroy)
+if [[ "$DCD_COMMAND" == "up" || "$DCD_COMMAND" == "status" || "$DCD_COMMAND" == "destroy" ]]; then
+  ARGS+=("${USER}@${HOST}:${PORT}")
+fi
+
 # --- Execute dcd Command ---
 log "Executing command: dcd ${ARGS[*]}"
 log "Starting deployment process..."
 
+# Unset internal variables to avoid leaking into dcd environment
+unset DCD_COMMAND COMPOSE_FILES_STR ENV_FILES_STR HOST PORT USER SSH_PRIVATE_KEY REMOTE_DIR NO_HEALTH_CHECK FORCE
 # Use exec to replace the shell process with dcd
 exec /usr/local/bin/dcd "${ARGS[@]}"
