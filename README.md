@@ -1,5 +1,12 @@
 # DCD - Docker Compose Deployment Tool
 
+[![Crates.io](https://img.shields.io/crates/v/dcd.svg)](https://crates.io/crates/dcd)
+[![Crates.io Downloads](https://img.shields.io/crates/d/dcd.svg)](https://crates.io/crates/dcd)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![CI Status (main)](https://img.shields.io/github/actions/workflow/status/g1ibby/dcd/ci.yml?branch=main&event=push)](https://github.com/g1ibby/dcd/actions/workflows/ci.yml)
+
+---
+
 **⚠️ Work In Progress: This tool is under active development. Features and command-line arguments may change.**
 
 DCD (Docker Compose Deployment) is a command-line tool designed to streamline the deployment of Docker Compose based applications to remote servers using SSH. It handles analyzing configuration, synchronizing necessary files, and managing the application lifecycle on the target host.
