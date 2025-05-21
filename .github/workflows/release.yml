@@ -180,12 +180,12 @@ jobs:
 
       - name: Publish conditionally within script
         env:
-          CRATES_IO_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          if [ -n "$CRATES_IO_TOKEN" ]; then
-            echo "CRATES_IO_TOKEN secret is set. Publishing to Crates.io..."
+          if [ -n "$CARGO_REGISTRY_TOKEN" ]; then
+            echo "CARGO_REGISTRY_TOKEN secret is set. Publishing to Crates.io..."
             cargo publish
           else
-            echo "Skipping publish to Crates.io: CRATES_IO_TOKEN secret not set or empty."
+            echo "Skipping publish to Crates.io: CARGO_REGISTRY_TOKEN secret not set or empty."
             exit 0
           fi
