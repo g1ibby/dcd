@@ -8,7 +8,7 @@ branding:
 inputs:
   command:
     description: 'Command to execute (analyze, up, status, destroy)'
-    required: true
+    required: false
     default: 'up'
   compose_files:
     description: 'Space-separated list of Docker Compose files'
@@ -39,11 +39,11 @@ inputs:
   no_health_check:
     description: 'Skip health check after deployment (for up command)'
     required: false
-    default: 'false'
+    default: 'true'
   force:
     description: 'Force destruction without confirmation (for destroy command)'
     required: false
-    default: 'false'
+    default: 'true'
 
 runs:
   using: 'docker'
