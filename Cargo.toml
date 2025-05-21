@@ -16,7 +16,7 @@ debug = 1
 incremental = true
 
 [dependencies]
-russh = "0.52.0"
+russh = "0.52.1"
 russh-sftp = "2.1.1"
 tokio = { version = "1.44.2", features = ["full"] }
 tokio-util = "0.7.14"
