@@ -47,4 +47,4 @@ inputs:
 
 runs:
   using: 'docker'
-  image: 'docker://ghcr.io/g1ibby/dcd-action:${{ github.action_ref }}'
+  image: 'docker://ghcr.io/g1ibby/dcd-action:latest'
