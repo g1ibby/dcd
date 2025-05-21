@@ -194,9 +194,8 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
-      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      # Define combined target in 'user@host:port' format
+      DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:${{ secrets.DEPLOY_PORT }}
       SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
       REMOTE_DIR: /opt/homellm
       # You can also set arbitrary vars here:
@@ -206,9 +205,7 @@ jobs:
       - name: Deploy with DCD
         uses: g1ibby/dcd/dcd-deploy@main
         with:
-          host: ${{ env.DEPLOY_HOST }}
-          port: ${{ env.DEPLOY_PORT }}
-          user: ${{ env.DEPLOY_USER }}
+          target: ${{ env.DEPLOY_TARGET }}
           ssh_private_key: ${{ env.SSH_PRIVATE_KEY }}
           remote_dir: ${{ env.REMOTE_DIR }}
           compose_files: docker-compose.yaml
@@ -229,9 +226,7 @@ jobs:
       - name: Deploy with DCD
         uses: g1ibby/dcd/dcd-deploy@main
         with:
-          host: ${{ secrets.HOST }}
-          port: ${{ secrets.PORT }}
-          user: ${{ secrets.SSH_USER }}
+          target: ${{ secrets.SSH_USER }}@${{ secrets.HOST }}:${{ secrets.PORT }}
           ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
           remote_dir: ${{ secrets.REMOTE_DIR }}
           compose_files: docker-compose.yaml

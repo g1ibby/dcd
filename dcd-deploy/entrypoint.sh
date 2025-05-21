@@ -17,20 +17,18 @@ error() {
 DCD_COMMAND="${INPUT_COMMAND}"
 COMPOSE_FILES_STR="${INPUT_COMPOSE_FILES}"
 ENV_FILES_STR="${INPUT_ENV_FILES}"
-HOST="${INPUT_HOST}"
-PORT="${INPUT_PORT:-22}"
-USER="${INPUT_USER:-root}"
 SSH_PRIVATE_KEY="${INPUT_SSH_PRIVATE_KEY}"
 REMOTE_DIR="${INPUT_REMOTE_DIR:-/opt/dcd}"
 NO_HEALTH_CHECK="${INPUT_NO_HEALTH_CHECK:-false}"
 FORCE="${INPUT_FORCE:-false}"
+SSH_TARGET="${INPUT_TARGET}"
 
 # Validate required inputs
 if [ -z "$DCD_COMMAND" ]; then
   error "command input is required."
 fi
-if [ -z "$HOST" ]; then
-  error "host input is required."
+if [[ "$DCD_COMMAND" =~ ^(up|status|destroy)$ ]] && [ -z "$SSH_TARGET" ]; then
+  error "target input is required for command '$DCD_COMMAND'. Specify as [user@]host[:port]."
 fi
 if [ -z "$SSH_PRIVATE_KEY" ]; then
   error "ssh_private_key input is required."
@@ -48,11 +46,6 @@ fi
 
 if [[ ! "$FORCE" =~ ^(true|false)$ ]]; then
   error "force must be 'true' or 'false', got: $FORCE"
-fi
-
-# Validate port is a number
-if ! [[ "$PORT" =~ ^[0-9]+$ ]]; then
-  error "port must be a number, got: $PORT"
 fi
 
 # --- SSH Setup ---
@@ -138,7 +131,7 @@ fi
 
 # Add target argument for remote commands (up, status, destroy)
 if [[ "$DCD_COMMAND" == "up" || "$DCD_COMMAND" == "status" || "$DCD_COMMAND" == "destroy" ]]; then
-  ARGS+=("${USER}@${HOST}:${PORT}")
+  ARGS+=("$SSH_TARGET")
 fi
 
 # --- Execute dcd Command ---
@@ -146,6 +139,6 @@ log "Executing command: dcd ${ARGS[*]}"
 log "Starting deployment process..."
 
 # Unset internal variables to avoid leaking into dcd environment
-unset DCD_COMMAND COMPOSE_FILES_STR ENV_FILES_STR HOST PORT USER SSH_PRIVATE_KEY REMOTE_DIR NO_HEALTH_CHECK FORCE
+unset DCD_COMMAND COMPOSE_FILES_STR ENV_FILES_STR SSH_TARGET SSH_PRIVATE_KEY REMOTE_DIR NO_HEALTH_CHECK FORCE
 # Use exec to replace the shell process with dcd
 exec /usr/local/bin/dcd "${ARGS[@]}"

@@ -18,17 +18,9 @@ inputs:
     description: 'Space-separated list of environment files'
     required: false
     default: ''
-  host:
-    description: 'Remote server IP address'
+  target:
+    description: 'Remote SSH target in the format [user@]host[:port]'
     required: true
-  port:
-    description: 'SSH port'
-    required: false
-    default: '22'
-  user:
-    description: 'SSH user'
-    required: false
-    default: 'root'
   ssh_private_key:
     description: 'SSH private key content'
     required: true
