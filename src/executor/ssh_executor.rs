@@ -58,14 +58,21 @@ struct ClientHandler {
     target_host: String,
     /// Keys loaded from the known_hosts file.
     trusted_keys: HashMap<String, Vec<keys::PublicKey>>,
+    /// If true, suppress printing the unknown-host-key warning.
+    suppress_unknown_host_warning: bool,
 }
 
 impl ClientHandler {
-    /// Create a new client handler with the given target host and trusted keys.
-    fn new(target_host: String, trusted_keys: HashMap<String, Vec<keys::PublicKey>>) -> Self {
+    /// Create a new client handler with the given target host, trusted keys, and warning flag.
+    fn new(
+        target_host: String,
+        trusted_keys: HashMap<String, Vec<keys::PublicKey>>,
+        suppress_unknown_host_warning: bool,
+    ) -> Self {
         Self {
             target_host,
             trusted_keys,
+            suppress_unknown_host_warning,
         }
     }
 }
@@ -101,11 +108,13 @@ impl client::Handler for ClientHandler {
                 }
             }
             None => {
-                print_unknown_host_key_warning(
-                    &self.target_host,
-                    &fingerprint_str,
-                    &server_public_key.public_key_base64(),
-                );
+                if !self.suppress_unknown_host_warning {
+                    print_unknown_host_key_warning(
+                        &self.target_host,
+                        &fingerprint_str,
+                        &server_public_key.public_key_base64(),
+                    );
+                }
                 Ok(true)
             }
         }
@@ -127,6 +136,7 @@ impl SshClient {
         target_host_str: String,
         known_hosts_map: HashMap<String, Vec<keys::PublicKey>>,
         timeout: Duration,
+        suppress_unknown_host_warning: bool,
     ) -> Result<Self, ExecutorError> {
         let key_pair = keys::load_secret_key(key_path.as_ref(), None)
             .map_err(|e| ExecutorError::SshError(e.to_string()))?;
@@ -137,7 +147,11 @@ impl SshClient {
         };
         let config = Arc::new(config);
         // Create the handler with the resolved host and loaded keys provided by caller
-        let handler = ClientHandler::new(target_host_str, known_hosts_map);
+        let handler = ClientHandler::new(
+            target_host_str,
+            known_hosts_map,
+            suppress_unknown_host_warning,
+        );
 
         let mut session = client::connect(config, addr, handler)
             .await
@@ -381,6 +395,7 @@ impl SshCommandExecutor {
         username: &str,
         addr: &str,
         timeout: Duration,
+        suppress_unknown_host_warning: bool,
     ) -> Result<Self, ExecutorError> {
         // --- Resolve hostname/IP ---
         let resolved_addr = tokio::net::lookup_host(addr)
@@ -416,6 +431,7 @@ impl SshCommandExecutor {
             target_host_str,
             known_hosts_map,
             timeout,
+            suppress_unknown_host_warning,
         )
         .await?;
         Ok(SshCommandExecutor { client })

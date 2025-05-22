@@ -56,6 +56,7 @@ impl Up {
             &target.user,
             &addr_str,
             Duration::from_secs(30), // TODO: Make timeout configurable
+            cli_args.no_warnings,
         )
         .await
         .map_err(|e| {

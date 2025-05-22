@@ -102,6 +102,7 @@ impl Destroy {
             &target.user,
             &addr_str,
             Duration::from_secs(30),
+            cli_args.no_warnings,
         )
         .await
         .map_err(|e| {

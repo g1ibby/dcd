@@ -36,6 +36,10 @@ inputs:
     description: 'Force destruction without confirmation (for destroy command)'
     required: false
     default: 'true'
+  no_warnings:
+    description: 'Disable host-key warnings (unknown-host warning)'
+    required: false
+    default: 'true'
 
 runs:
   using: 'docker'

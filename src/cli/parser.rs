@@ -32,6 +32,9 @@ pub struct Cli {
     /// Increase message verbosity (-v for debug, -vv for trace)
     #[arg(short, long, action = ArgAction::Count, global = true)]
     pub verbose: u8,
+    /// Disable host-key warnings (unknown-host warning)
+    #[arg(long, global = true)]
+    pub no_warnings: bool,
 
     #[command(subcommand)]
     pub command: Commands,

@@ -22,6 +22,7 @@ REMOTE_DIR="${INPUT_REMOTE_DIR:-/opt/dcd}"
 NO_HEALTH_CHECK="${INPUT_NO_HEALTH_CHECK:-false}"
 FORCE="${INPUT_FORCE:-false}"
 SSH_TARGET="${INPUT_TARGET}"
+NO_WARNINGS="${INPUT_NO_WARNINGS:-false}"
 
 # Validate required inputs
 if [ -z "$DCD_COMMAND" ]; then
@@ -46,6 +47,9 @@ fi
 
 if [[ ! "$FORCE" =~ ^(true|false)$ ]]; then
   error "force must be 'true' or 'false', got: $FORCE"
+fi
+if [[ ! "$NO_WARNINGS" =~ ^(true|false)$ ]]; then
+  error "no_warnings must be 'true' or 'false', got: $NO_WARNINGS"
 fi
 
 # --- SSH Setup ---
@@ -117,6 +121,10 @@ fi
 # Add common options (identity file and working directory)
 ARGS+=("-i" "$KEY_FILE")
 ARGS+=("-w" "$REMOTE_DIR")
+  # Add no-warnings flag if requested
+  if [ "$NO_WARNINGS" = "true" ]; then
+    ARGS+=("--no-warnings")
+  fi
 
 # Add the main command
 ARGS+=("$DCD_COMMAND")
