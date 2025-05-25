@@ -81,6 +81,9 @@ pub trait DockerManager: Send {
 
     /// Remove a specific volume
     async fn remove_volume(&mut self, volume_name: &str) -> DockerResult<()>;
+
+    /// Remove unused images to save disk space
+    async fn prune_images(&mut self) -> DockerResult<()>;
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -325,6 +328,9 @@ impl DockerManager for SshDockerManager<'_> {
     }
 
     async fn compose_up(&mut self) -> DockerResult<()> {
+        // First prune unused images to save disk space
+        self.prune_images().await?;
+
         // Pull latest images and start services with configured compose and env files
         let pull_cmd = self.format_docker_compose_command("pull");
         let up_cmd = self.format_docker_compose_command("up -d --remove-orphans");
@@ -475,6 +481,53 @@ impl DockerManager for SshDockerManager<'_> {
                 cmd,
                 message: result.output.to_stderr_string()?,
             });
+        }
+        Ok(())
+    }
+
+    async fn prune_images(&mut self) -> DockerResult<()> {
+        tracing::info!("Pruning unused images for current project to save disk space...");
+
+        // Get the project name from the working directory (used by docker-compose for labeling)
+        let project_name = self
+            .working_directory
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "default".to_string());
+
+        // First, try to get current project images to understand what we're working with
+        let images_cmd = self.format_docker_compose_command("images --format json");
+        if let Ok(images_result) = self.execute_compose_command(&images_cmd).await {
+            if images_result.is_success() {
+                let stdout = images_result.output.to_stdout_string().unwrap_or_default();
+                if !stdout.trim().is_empty() {
+                    tracing::debug!("Current project images: {}", stdout.trim());
+                }
+            }
+        }
+
+        // Prune images with compose project label to target only this project's unused images
+        let cmd = format!(
+            "docker image prune -f --filter label=com.docker.compose.project={}",
+            project_name
+        );
+
+        let result = self.executor.execute_command(&cmd).await?;
+
+        if !result.is_success() {
+            let error_msg = result.output.to_stderr_string()?;
+            tracing::warn!("Project image pruning failed: {}", error_msg);
+            return Err(DockerError::CommandError {
+                cmd: cmd.to_string(),
+                message: error_msg,
+            });
+        }
+
+        let stdout = result.output.to_stdout_string()?;
+        if !stdout.trim().is_empty() {
+            tracing::info!("Project image pruning result: {}", stdout.trim());
+        } else {
+            tracing::info!("No unused project images found to prune.");
         }
         Ok(())
     }
