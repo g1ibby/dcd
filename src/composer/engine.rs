@@ -8,6 +8,7 @@ use crate::composer::{
     variables::availability::EnvironmentChecker,
     variables::availability::EnvironmentStatus,
     variables::parser::VariablesParser,
+    variables::profiles::ProfilesHandler,
 };
 use crate::executor::CommandExecutor;
 
@@ -150,8 +151,33 @@ impl<T: CommandExecutor> Composer<T> {
         // Step 3: Extract all required information
         let mut output = self.process_compose_file(&compose_file)?;
 
+        // Step 4: Handle profiles with access to env file variables
+        let mut profiles_handler = ProfilesHandler::new();
+        let mut env_checker = EnvironmentChecker::new();
+        env_checker
+            .check_environment(&[], &self.config.env_files)
+            .await?;
+        profiles_handler.set_env_file_vars(&env_checker.get_available_variables());
+
+        // Update profile information in output
+        output.active_profiles = profiles_handler.get_active_profiles();
+
+        // Validate profiles and add COMPOSE_PROFILES to consumed_env if valid
+        let profile_validation = profiles_handler.validate_profiles(&output.available_profiles)?;
+        if profile_validation.is_valid() {
+            if let Some(profiles_value) =
+                profiles_handler.get_env_dcd_value(&output.available_profiles)
+            {
+                output
+                    .consumed_env
+                    .insert("COMPOSE_PROFILES".to_string(), profiles_value);
+            }
+        }
+
         // Add resolved environment variables to output
-        output.consumed_env = env_status.get_resolved_variables();
+        output
+            .consumed_env
+            .extend(env_status.get_resolved_variables());
 
         // Add resolved file lists from the config held by the Composer instance
         output.resolved_compose_files = self.config.compose_files.clone();
@@ -214,7 +240,21 @@ impl<T: CommandExecutor> Composer<T> {
     fn process_compose_file(&self, compose_file: &ComposeFile) -> ComposerResult<ComposerOutput> {
         let mut output = ComposerOutput::new();
 
-        // Extract ports
+        // Collect all available profiles from all services
+        let mut all_profiles = std::collections::HashSet::new();
+        for service in compose_file.services.values() {
+            if let Some(profiles) = &service.profiles {
+                all_profiles.extend(profiles.iter().cloned());
+            }
+        }
+        output.available_profiles = all_profiles.into_iter().collect();
+        output.available_profiles.sort();
+
+        // Handle profiles using ProfilesHandler
+        let profiles_handler = ProfilesHandler::new();
+        output.active_profiles = profiles_handler.get_active_profiles();
+
+        // Extract ports and volumes from all services (profiles are handled by docker-compose itself)
         for service in compose_file.services.values() {
             if let Some(ports) = &service.ports {
                 let parsed_ports = PortsParser::parse_ports(ports)?;
@@ -531,6 +571,7 @@ volumes:
             }]),
             configs: None,
             env_file: None,
+            profiles: None,
         };
 
         services.insert("db".to_string(), db_service);

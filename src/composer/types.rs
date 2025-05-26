@@ -40,6 +40,7 @@ pub struct Service {
     pub configs: Option<Vec<ConfigReference>>,
     #[serde(rename = "env_file")]
     pub env_file: Option<EnvFiles>,
+    pub profiles: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -91,6 +92,8 @@ pub struct ComposerOutput {
     pub resolved_compose_files: Vec<PathBuf>,
     pub resolved_project_dir: PathBuf,
     pub resolved_env_files: Vec<PathBuf>,
+    pub available_profiles: Vec<String>,
+    pub active_profiles: Vec<String>,
 }
 
 impl Default for ComposerOutput {
@@ -110,6 +113,8 @@ impl ComposerOutput {
             resolved_compose_files: Vec::new(),
             resolved_project_dir: PathBuf::new(),
             resolved_env_files: Vec::new(),
+            available_profiles: Vec::new(),
+            active_profiles: Vec::new(),
         }
     }
 }

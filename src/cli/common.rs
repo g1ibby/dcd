@@ -207,4 +207,26 @@ pub fn print_analysis_results(analysis: &ComposerOutput) {
             );
         }
     }
+
+    println!("\n{}", ui::format_header("Docker Compose Profiles:"));
+    if analysis.available_profiles.is_empty() {
+        println!("  {}", ui::format_warning("(None defined)"));
+    } else {
+        println!("  Available profiles:");
+        for profile in &analysis.available_profiles {
+            println!("    - {}", ui::format_highlight(profile));
+        }
+    }
+
+    if !analysis.active_profiles.is_empty() {
+        println!("  Active profiles:");
+        for profile in &analysis.active_profiles {
+            println!("    - {}", ui::format_highlight(profile));
+        }
+    } else if !analysis.available_profiles.is_empty() {
+        println!(
+            "  {}",
+            ui::format_warning("No profiles currently active (set COMPOSE_PROFILES to activate)")
+        );
+    }
 }

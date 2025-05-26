@@ -3,10 +3,10 @@
 
 EXIT_CODE=0
 
-echo "Checking for staged changes in src/..."
-# Check if any staged files are within the src/ directory
-if git diff --cached --name-only | grep -q '^src/'; then
-  echo "Found staged changes in src/. Running Rust checks..."
+echo "Checking for staged changes in src/ and tests/..."
+# Check if any staged files are within the src/ or tests/ directories
+if git diff --cached --name-only | grep -q '^src/\|^tests/'; then
+  echo "Found staged changes in src/ or tests/. Running Rust checks..."
 
   # 1. Check formatting
   echo "Checking formatting..."
@@ -14,7 +14,7 @@ if git diff --cached --name-only | grep -q '^src/'; then
     echo "Formatting issues found. Attempting to auto-fix..."
     cargo fmt
     # Stage the formatted files that were already staged
-    git diff --name-only | grep '^src/' | xargs -I{} git add {}
+    git diff --name-only | grep '^src/\|^tests/' | xargs -I{} git add {}
     echo "Formatting fixed and changes staged."
   else
     echo "Formatting OK."
@@ -27,7 +27,7 @@ if git diff --cached --name-only | grep -q '^src/'; then
     # Note: --fix is a nightly feature, so we check if it works
     if cargo clippy --fix --allow-dirty --allow-staged -- -D warnings 2>/dev/null; then
       # Stage the fixed files that were already staged
-      git diff --name-only | grep '^src/' | xargs -I{} git add {}
+      git diff --name-only | grep '^src/\|^tests/' | xargs -I{} git add {}
       echo "Clippy issues fixed and changes staged."
     else
       echo "Automatic fix failed. Please fix the issues manually."
@@ -54,7 +54,7 @@ if git diff --cached --name-only | grep -q '^src/'; then
     echo "Some issues could not be fixed automatically. Please resolve them manually."
   fi
 else
-  echo "No staged changes found in src/. Skipping Rust checks."
+  echo "No staged changes found in src/ or tests/. Skipping Rust checks."
 fi
 
 exit $EXIT_CODE

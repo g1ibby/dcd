@@ -1,7 +1,7 @@
 use lazy_static::lazy_static;
 use std::borrow::Cow;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tempfile::TempDir;
 use testcontainers::core::{Image, WaitFor};
 use testcontainers::{
@@ -126,6 +126,72 @@ pub fn build_dcd_binary() -> PathBuf {
     }
     DCD_PATH.clone()
 }
+/// Waits for a container to appear via SSH, polling every 0.5s until timeout.
+pub async fn wait_for_container(
+    ssh_port: u16,
+    key_path: &str,
+    target: &str,
+    container_name: &str,
+    timeout: Duration,
+) {
+    let start = Instant::now();
+    loop {
+        let mut cmd = ssh_cmd(
+            ssh_port,
+            key_path,
+            target,
+            &["docker", "ps", "--format", "{{.Names}}"],
+        );
+        let output = cmd.output().await.expect("Failed to execute SSH docker ps");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if stdout
+            .lines()
+            .any(|name| name.trim().contains(container_name))
+        {
+            break;
+        }
+        if start.elapsed() >= timeout {
+            panic!(
+                "Timed out waiting for container '{}' to appear. Last output: {}",
+                container_name, stdout
+            );
+        }
+        sleep(Duration::from_millis(500)).await;
+    }
+}
+/// Waits for a container to be removed via SSH, polling every 0.5s until timeout.
+pub async fn wait_for_container_absent(
+    ssh_port: u16,
+    key_path: &str,
+    target: &str,
+    container_substring: &str,
+    timeout: Duration,
+) {
+    let start = Instant::now();
+    loop {
+        let mut cmd = ssh_cmd(
+            ssh_port,
+            key_path,
+            target,
+            &["docker", "ps", "--format", "{{.Names}}", "-a"],
+        );
+        let output = cmd
+            .output()
+            .await
+            .expect("Failed to execute SSH docker ps -a");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if !stdout.contains(container_substring) {
+            break;
+        }
+        if start.elapsed() >= timeout {
+            panic!(
+                "Timed out waiting for container '{}' to disappear. Last output: {}",
+                container_substring, stdout
+            );
+        }
+        sleep(Duration::from_millis(500)).await;
+    }
+}
 
 /// A test project context with prepared files
 pub struct TestProject {
@@ -230,34 +296,18 @@ impl TestProject {
             stderr_destroy
         );
 
-        // Verify all specified containers are gone
-        sleep(Duration::from_secs(5)).await; // Give time for containers to be removed
-
+        // Verify all specified containers are gone, waiting dynamically
         let ssh_key_path = self.project_dir.join("test_ssh_key");
-        let ps_after_destroy_output = ssh_cmd(
-            ssh_port,
-            ssh_key_path.to_str().unwrap(),
-            "root@localhost", // Assumes SSH server is on localhost for the test runner
-            &["docker", "ps", "--format", "{{.Names}}", "-a"],
-        )
-        .output()
-        .await
-        .expect("SSH docker ps failed (after destroy, from TestProject)");
-
-        assert!(
-            ps_after_destroy_output.status.success(),
-            "SSH docker ps command failed (after destroy, from TestProject): stderr: {}",
-            String::from_utf8_lossy(&ps_after_destroy_output.stderr)
-        );
-
-        let ps_stdout_after_destroy = String::from_utf8_lossy(&ps_after_destroy_output.stdout);
+        let key_path_str = ssh_key_path.to_str().unwrap();
         for name_substring in expected_absent_container_substrings {
-            assert!(
-                !ps_stdout_after_destroy.contains(name_substring),
-                "Container substring '{}' still present after destroy (from TestProject): {}",
+            wait_for_container_absent(
+                ssh_port,
+                key_path_str,
+                "root@localhost",
                 name_substring,
-                ps_stdout_after_destroy
-            );
+                Duration::from_secs(10),
+            )
+            .await;
         }
     }
 }
