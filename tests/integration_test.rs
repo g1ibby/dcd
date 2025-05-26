@@ -1,7 +1,6 @@
 use std::time::Duration;
 use tokio::fs;
 use tokio::process::Command;
-use tokio::time::sleep;
 
 mod common;
 use common::{build_dcd_binary, ssh_cmd, start_ssh_server, wait_for_container, TestProject};

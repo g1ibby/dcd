@@ -14,9 +14,18 @@ impl Default for ProfilesHandler {
 }
 
 impl ProfilesHandler {
+    /// Create a handler by capturing the current process environment
     pub fn new() -> Self {
         Self {
             system_env: std::env::vars().collect(),
+            env_file_vars: HashMap::new(),
+        }
+    }
+
+    /// Create a handler with a provided set of system environment variables
+    pub fn with_system_env(system_env: HashMap<String, String>) -> Self {
+        Self {
+            system_env,
             env_file_vars: HashMap::new(),
         }
     }
@@ -137,24 +146,19 @@ mod tests {
 
     #[test]
     fn test_get_active_profiles_from_system_env() {
-        std::env::set_var("COMPOSE_PROFILES", "dev,test");
-
-        let handler = ProfilesHandler::new();
+        let mut system_env = HashMap::new();
+        system_env.insert("COMPOSE_PROFILES".to_string(), "dev,test".to_string());
+        let handler = ProfilesHandler::with_system_env(system_env);
         let profiles = handler.get_active_profiles();
-
         assert_eq!(profiles, vec!["dev", "test"]);
-
-        std::env::remove_var("COMPOSE_PROFILES");
     }
 
     #[test]
     fn test_get_active_profiles_from_env_file() {
         let mut env_vars = HashMap::new();
         env_vars.insert("COMPOSE_PROFILES".to_string(), "prod,staging".to_string());
-
-        let mut handler = ProfilesHandler::new();
+        let mut handler = ProfilesHandler::with_system_env(HashMap::new());
         handler.set_env_file_vars(&env_vars);
-
         let profiles = handler.get_active_profiles();
         assert_eq!(profiles, vec!["prod", "staging"]);
     }
@@ -163,13 +167,10 @@ mod tests {
     fn test_validate_profiles_valid() {
         let mut env_vars = HashMap::new();
         env_vars.insert("COMPOSE_PROFILES".to_string(), "dev,test".to_string());
-
-        let mut handler = ProfilesHandler::new();
+        let mut handler = ProfilesHandler::with_system_env(HashMap::new());
         handler.set_env_file_vars(&env_vars);
-
         let available = vec!["dev".to_string(), "test".to_string(), "prod".to_string()];
         let result = handler.validate_profiles(&available).unwrap();
-
         assert!(result.is_valid());
         assert_eq!(result.active_profiles, vec!["dev", "test"]);
         assert!(result.invalid_profiles.is_empty());
@@ -179,13 +180,10 @@ mod tests {
     fn test_validate_profiles_invalid() {
         let mut env_vars = HashMap::new();
         env_vars.insert("COMPOSE_PROFILES".to_string(), "dev,invalid".to_string());
-
-        let mut handler = ProfilesHandler::new();
+        let mut handler = ProfilesHandler::with_system_env(HashMap::new());
         handler.set_env_file_vars(&env_vars);
-
         let available = vec!["dev".to_string(), "test".to_string()];
         let result = handler.validate_profiles(&available).unwrap();
-
         assert!(!result.is_valid());
         assert_eq!(result.invalid_profiles, vec!["invalid"]);
     }
@@ -194,13 +192,10 @@ mod tests {
     fn test_should_include_in_env_dcd() {
         let mut env_vars = HashMap::new();
         env_vars.insert("COMPOSE_PROFILES".to_string(), "dev,test".to_string());
-
-        let mut handler = ProfilesHandler::new();
+        let mut handler = ProfilesHandler::with_system_env(HashMap::new());
         handler.set_env_file_vars(&env_vars);
-
         let available = vec!["dev".to_string(), "test".to_string(), "prod".to_string()];
         assert!(handler.should_include_in_env_dcd(&available));
-
         let limited_available = vec!["dev".to_string()];
         assert!(!handler.should_include_in_env_dcd(&limited_available));
     }
