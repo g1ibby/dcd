@@ -144,7 +144,10 @@ pub async fn wait_for_container(
         );
         let output = cmd.output().await.expect("Failed to execute SSH docker ps");
         let stdout = String::from_utf8_lossy(&output.stdout);
-        if stdout.lines().any(|name| name.trim().contains(container_name)) {
+        if stdout
+            .lines()
+            .any(|name| name.trim().contains(container_name))
+        {
             break;
         }
         if start.elapsed() >= timeout {
@@ -172,7 +175,10 @@ pub async fn wait_for_container_absent(
             target,
             &["docker", "ps", "--format", "{{.Names}}", "-a"],
         );
-        let output = cmd.output().await.expect("Failed to execute SSH docker ps -a");
+        let output = cmd
+            .output()
+            .await
+            .expect("Failed to execute SSH docker ps -a");
         let stdout = String::from_utf8_lossy(&output.stdout);
         if !stdout.contains(container_substring) {
             break;
