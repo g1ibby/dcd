@@ -4,7 +4,7 @@ use tokio::process::Command;
 use tokio::time::sleep;
 
 mod common;
-use common::{build_dcd_binary, ssh_cmd, start_ssh_server, TestProject};
+use common::{build_dcd_binary, ssh_cmd, start_ssh_server, TestProject, wait_for_container};
 
 #[cfg(feature = "integration-tests")]
 #[tokio::test]
@@ -97,8 +97,15 @@ async fn test_dcd_up() {
         stderr
     );
 
-    // Allow some time for Docker Compose to start containers
-    sleep(Duration::from_secs(5)).await;
+    // Wait for nginx container to start
+    wait_for_container(
+        ssh_port,
+        "tests/test_ssh_key",
+        "root@localhost",
+        "nginx",
+        Duration::from_secs(10),
+    )
+    .await;
 
     // Verify nginx container is running via SSH
     let ps_output = ssh_cmd(
@@ -186,8 +193,15 @@ async fn test_dcd_up_with_env_and_defaults() {
         stderr
     );
 
-    // Allow some time for Docker Compose to start containers
-    sleep(Duration::from_secs(5)).await;
+    // Wait for test_env container to start
+    wait_for_container(
+        ssh_port,
+        "tests/test_ssh_key",
+        "root@localhost",
+        "test_env",
+        Duration::from_secs(10),
+    )
+    .await;
 
     // Verify test_env container is running via SSH
     let ps_output = ssh_cmd(
@@ -303,7 +317,15 @@ async fn test_dcd_redeploy_with_changes() {
         stderr_up1
     );
 
-    sleep(Duration::from_secs(5)).await; // Allow time for containers to start
+    // Wait for service1_redeploy container to start after first deploy
+    wait_for_container(
+        ssh_port,
+        "tests/test_ssh_key",
+        "root@localhost",
+        "service1_redeploy",
+        Duration::from_secs(10),
+    )
+    .await;
 
     // Verify service1 after 1st deploy
     let ps_output1 = ssh_cmd(
@@ -411,7 +433,23 @@ async fn test_dcd_redeploy_with_changes() {
         stderr_up2
     );
 
-    sleep(Duration::from_secs(10)).await;
+    // Wait for service1_redeploy and service2_redeploy containers to start after redeploy
+    wait_for_container(
+        ssh_port,
+        "tests/test_ssh_key",
+        "root@localhost",
+        "service1_redeploy",
+        Duration::from_secs(15),
+    )
+    .await;
+    wait_for_container(
+        ssh_port,
+        "tests/test_ssh_key",
+        "root@localhost",
+        "service2_redeploy",
+        Duration::from_secs(15),
+    )
+    .await;
 
     // Verify after redeploy
     let ps_output2 = ssh_cmd(
@@ -550,7 +588,15 @@ async fn test_dcd_compose_profiles() {
         stderr_up1
     );
 
-    sleep(Duration::from_secs(5)).await;
+    // Wait for web_profile_test container to start
+    wait_for_container(
+        ssh_port,
+        "tests/test_ssh_key",
+        "root@localhost",
+        "web_profile_test",
+        Duration::from_secs(10),
+    )
+    .await;
 
     // Verify only web_service is running (dev_service should not be running)
     let ps_output1 = ssh_cmd(
@@ -638,7 +684,23 @@ async fn test_dcd_compose_profiles() {
         stderr_up2
     );
 
-    sleep(Duration::from_secs(5)).await;
+    // Wait for web_profile_test and dev_profile_test containers to start
+    wait_for_container(
+        ssh_port,
+        "tests/test_ssh_key",
+        "root@localhost",
+        "web_profile_test",
+        Duration::from_secs(10),
+    )
+    .await;
+    wait_for_container(
+        ssh_port,
+        "tests/test_ssh_key",
+        "root@localhost",
+        "dev_profile_test",
+        Duration::from_secs(10),
+    )
+    .await;
 
     // Verify both web_service and dev_service are running
     let ps_output2 = ssh_cmd(
