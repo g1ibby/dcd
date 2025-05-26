@@ -477,3 +477,218 @@ async fn test_dcd_redeploy_with_changes() {
 
     container.stop().await.unwrap();
 }
+
+#[cfg(feature = "integration-tests")]
+#[tokio::test]
+async fn test_dcd_compose_profiles() {
+    let (container, ssh_port) = start_ssh_server().await;
+    let _dcd_path = build_dcd_binary();
+
+    // Create docker-compose.yml with two services:
+    // - web_service: no profile (always runs)
+    // - dev_service: has "development" profile (only runs when profile is active)
+    let compose_content = [
+        "version: '3'",
+        "services:",
+        "  web_service:",
+        "    image: busybox:latest",
+        "    container_name: web_profile_test",
+        "    command: [\"sh\", \"-c\", \"sleep 3600\"]",
+        "    environment:",
+        "      - SERVICE_NAME=web",
+        "  dev_service:",
+        "    image: busybox:latest",
+        "    container_name: dev_profile_test",
+        "    command: [\"sh\", \"-c\", \"sleep 3600\"]",
+        "    environment:",
+        "      - SERVICE_NAME=dev",
+        "    profiles:",
+        "      - development",
+    ]
+    .join("\n");
+
+    let env_content = ""; // No env vars needed for this test
+    let remote_workdir = "/opt/test_dcd_profiles";
+    let project = TestProject::new(&compose_content, env_content, remote_workdir).await;
+    let target = format!("root@localhost:{}", ssh_port);
+
+    // --- Phase 1: Deploy WITHOUT COMPOSE_PROFILES ---
+    // Only web_service should start (no profile required)
+    let mut cmd_up1 = Command::new(&project.dcd_bin_path);
+    cmd_up1.current_dir(&project.project_dir).args([
+        "-f",
+        project.compose_path.to_str().unwrap(),
+        "-e",
+        project.env_path.to_str().unwrap(),
+        "-i",
+        "test_ssh_key",
+        "-w",
+        remote_workdir,
+        "up",
+        "--no-health-check",
+        &target,
+    ]);
+
+    let output_up1 = cmd_up1
+        .output()
+        .await
+        .expect("Failed to execute DCD up command (without profiles)");
+    assert!(
+        output_up1.status.success(),
+        "DCD up command failed (without profiles): stderr: {}, stdout: {}",
+        String::from_utf8_lossy(&output_up1.stderr),
+        String::from_utf8_lossy(&output_up1.stdout)
+    );
+
+    let stdout_up1 = String::from_utf8_lossy(&output_up1.stdout);
+    let stderr_up1 = String::from_utf8_lossy(&output_up1.stderr);
+    assert!(
+        stdout_up1.contains("Deployment successful")
+            || stderr_up1.contains("Deployment successful"),
+        "Unexpected output (without profiles):\n--- STDOUT ---\n{}\n--- STDERR ---\n{}",
+        stdout_up1,
+        stderr_up1
+    );
+
+    sleep(Duration::from_secs(5)).await;
+
+    // Verify only web_service is running (dev_service should not be running)
+    let ps_output1 = ssh_cmd(
+        ssh_port,
+        "tests/test_ssh_key",
+        "root@localhost",
+        &["docker", "ps", "--format", "{{.Names}}"],
+    )
+    .output()
+    .await
+    .expect("SSH docker ps failed (after deploy without profiles)");
+
+    let ps_stdout1 = String::from_utf8_lossy(&ps_output1.stdout);
+    assert!(
+        ps_stdout1
+            .lines()
+            .any(|name| name.trim() == "web_profile_test"),
+        "web_profile_test container not found (without profiles): {}",
+        ps_stdout1
+    );
+    assert!(
+        !ps_stdout1
+            .lines()
+            .any(|name| name.trim() == "dev_profile_test"),
+        "dev_profile_test container should not be running (without profiles): {}",
+        ps_stdout1
+    );
+
+    // Verify web_service environment
+    let env_output1 = ssh_cmd(
+        ssh_port,
+        "tests/test_ssh_key",
+        "root@localhost",
+        &["docker", "exec", "web_profile_test", "env"],
+    )
+    .output()
+    .await
+    .expect("SSH docker exec env failed (web_service, without profiles)");
+
+    let env_stdout1 = String::from_utf8_lossy(&env_output1.stdout);
+    assert!(
+        env_stdout1.contains("SERVICE_NAME=web"),
+        "SERVICE_NAME not 'web' in web_service (without profiles): {}",
+        env_stdout1
+    );
+
+    // --- Phase 2: Redeploy WITH COMPOSE_PROFILES=development ---
+    // Both web_service and dev_service should start
+    let mut cmd_up2 = Command::new(&project.dcd_bin_path);
+    cmd_up2
+        .current_dir(&project.project_dir)
+        .env("COMPOSE_PROFILES", "development") // Set the profiles environment variable
+        .args([
+            "-f",
+            project.compose_path.to_str().unwrap(),
+            "-e",
+            project.env_path.to_str().unwrap(),
+            "-i",
+            "test_ssh_key",
+            "-w",
+            remote_workdir,
+            "up",
+            "--no-health-check",
+            &target,
+        ]);
+
+    let output_up2 = cmd_up2
+        .output()
+        .await
+        .expect("Failed to execute DCD up command (with profiles)");
+    assert!(
+        output_up2.status.success(),
+        "DCD up command failed (with profiles): stderr: {}, stdout: {}",
+        String::from_utf8_lossy(&output_up2.stderr),
+        String::from_utf8_lossy(&output_up2.stdout)
+    );
+
+    let stdout_up2 = String::from_utf8_lossy(&output_up2.stdout);
+    let stderr_up2 = String::from_utf8_lossy(&output_up2.stderr);
+    assert!(
+        stdout_up2.contains("Deployment successful")
+            || stderr_up2.contains("Deployment successful"),
+        "Unexpected output (with profiles):\n--- STDOUT ---\n{}\n--- STDERR ---\n{}",
+        stdout_up2,
+        stderr_up2
+    );
+
+    sleep(Duration::from_secs(5)).await;
+
+    // Verify both web_service and dev_service are running
+    let ps_output2 = ssh_cmd(
+        ssh_port,
+        "tests/test_ssh_key",
+        "root@localhost",
+        &["docker", "ps", "--format", "{{.Names}}"],
+    )
+    .output()
+    .await
+    .expect("SSH docker ps failed (after deploy with profiles)");
+
+    let ps_stdout2 = String::from_utf8_lossy(&ps_output2.stdout);
+    assert!(
+        ps_stdout2
+            .lines()
+            .any(|name| name.trim() == "web_profile_test"),
+        "web_profile_test container not found (with profiles): {}",
+        ps_stdout2
+    );
+    assert!(
+        ps_stdout2
+            .lines()
+            .any(|name| name.trim() == "dev_profile_test"),
+        "dev_profile_test container not found (with profiles): {}",
+        ps_stdout2
+    );
+
+    // Verify dev_service environment
+    let env_output2 = ssh_cmd(
+        ssh_port,
+        "tests/test_ssh_key",
+        "root@localhost",
+        &["docker", "exec", "dev_profile_test", "env"],
+    )
+    .output()
+    .await
+    .expect("SSH docker exec env failed (dev_service, with profiles)");
+
+    let env_stdout2 = String::from_utf8_lossy(&env_output2.stdout);
+    assert!(
+        env_stdout2.contains("SERVICE_NAME=dev"),
+        "SERVICE_NAME not 'dev' in dev_service (with profiles): {}",
+        env_stdout2
+    );
+
+    // --- Teardown ---
+    project
+        .destroy(&target, ssh_port, &["web_profile_test", "dev_profile_test"])
+        .await;
+
+    container.stop().await.unwrap();
+}
