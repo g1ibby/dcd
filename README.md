@@ -9,6 +9,25 @@
 
 DCD (Docker Compose Deployment) is a command-line tool designed to streamline the deployment of Docker Compose based applications to remote servers using SSH. It handles analyzing configuration, synchronizing necessary files, and managing the application lifecycle on the target host.
 
+## Why DCD?
+
+When developing personal projects, you often reach a point where you need to deploy your application to production. While managed Platform-as-a-Service (PaaS) solutions like Render.com, Vercel, or Railway are convenient, they come with limitations:
+
+- **Vendor lock-in** - You're tied to their platform and pricing
+- **Limited control** - Restricted customization and configuration options  
+- **Cost scaling** - Pricing can become expensive as your project grows
+- **Feature constraints** - Not all services or configurations are supported
+
+Sometimes you just want the simplicity of **self-hosted deployment** - using your own VPS with full control, but without the complexity of setting up elaborate CI/CD pipelines or learning container orchestration platforms.
+
+**DCD bridges this gap** by providing a simple, reliable way to:
+- Deploy Docker Compose applications to any VPS via SSH
+- Update deployments seamlessly when you push new versions
+- Integrate effortlessly with GitHub Actions for automatic deployments
+- Maintain full control over your infrastructure while keeping deployment simple
+
+It's perfect for developers who want the best of both worlds: the simplicity of `docker-compose up` with the power of remote deployment and automated CI/CD.
+
 ## Features
 
 - **Remote Deployment**: Deploy applications defined by Docker Compose files to remote servers over SSH.
@@ -30,24 +49,6 @@ cargo install dcd
 
 Download the latest binary for your platform from the [releases page](https://github.com/g1ibby/dcd/releases).
 
-### For Developers
-
-After cloning the repository, set up the Git hooks to ensure code quality:
-
-```bash
-chmod +x .githooks/pre-commit
-git config core.hooksPath .githooks
-```
-
-This will enable pre-commit checks that run `cargo fmt` and `cargo clippy` before each commit.
-
-### Live Development Testing
-
-For easier development and testing, you can use `cargo watch` to automatically rebuild and install `dcd` whenever you save changes to the source code:
-
-```bash
-cargo watch -c -x check -s "cargo install --path . --debug"
-```
 
 ## Usage
 
@@ -101,8 +102,6 @@ These options apply to all commands:
     *   `--force`: Destroy without confirmation and remove associated volumes.
     *   `--no-progress`: Disable the interactive progress spinner.
 
-```bash
-```
 
 ## Examples
 
@@ -134,7 +133,7 @@ DCD is also available as a GitHub Action for deploying your Docker Compose appli
   uses: g1ibby/dcd/dcd-deploy@v1
   with:
     command: up
-    target: ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} # Combine user and host
+    target: ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}
     compose_files: "docker-compose.yml docker-compose.prod.yml"
     env_files: ".env.prod"
     ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
@@ -187,6 +186,18 @@ jobs:
 
 See the [example workflow](.github/workflows/example-deploy.yml) for a more complete example.
 
+### Real-World Example: HomeLLM
+
+[HomeLLM](https://github.com/g1ibby/homellm) is a self-hosted LLM deployment project that uses DCD for automated deployments. It demonstrates how to integrate DCD into your CI/CD pipeline for seamless Docker Compose application deployment.
+
+The project shows a practical example of:
+- Deploying a multi-service Docker Compose stack (Open WebUI, LiteLLM, PostgreSQL, Traefik)
+- Automated deployment on push to main branch
+- Environment variable management for production secrets
+- Simple CI/CD setup for personal projects
+
+Check out its [deployment workflow](https://github.com/g1ibby/homellm/blob/main/.github/workflows/deploy.yml) to see DCD in action for a real project.
+
 ### Using Environment Variables in with: Inputs
 
 Instead of repeating secrets directly in your `with:` block, you can scope them at the job or environment level and reference via `${{ env.VAR }}` or `${{ secrets.VAR }}` in your inputs.
@@ -237,7 +248,11 @@ jobs:
           env_files: .env
 ```
 
+## Limitations
 
-## Releasing
+- **Operating System**: Currently tested to work with Debian-based systems. Should work with Ubuntu as well, but other Linux distributions may require adjustments.
+- **Docker Build Context**: Does not properly handle services that use the `build:` directive to build custom images from source. Use pre-built images from registries instead.
 
-For more information on the release process, see [RELEASING.md](RELEASING.md).
+## For Developers
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing, and contribution guidelines.
