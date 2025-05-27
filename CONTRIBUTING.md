@@ -105,7 +105,6 @@ DCD is organized into four main modules:
 - **Deployer (`src/deployer/`)**: Remote deployment orchestration  
 - **Executor (`src/executor/`)**: Command execution abstraction
 
-For detailed architecture information, see the [CLAUDE.md](CLAUDE.md) file.
 
 ## Testing
 
