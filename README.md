@@ -7,6 +7,11 @@
 
 ---
 
+<div align="center">
+  <img src="demo/demo.gif" alt="DCD Demo" width="800">
+  <br><br>
+</div>
+
 DCD (Docker Compose Deployment) is a command-line tool designed to streamline the deployment of Docker Compose based applications to remote servers using SSH. It handles analyzing configuration, synchronizing necessary files, and managing the application lifecycle on the target host.
 
 ## Why DCD?
