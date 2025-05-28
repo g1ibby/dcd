@@ -1,4 +1,4 @@
-# 🚀 DCD - Deploy Docker Apps in Seconds, Not Hours
+# ⚡ DCD - Deploy Docker Apps in Seconds, Not Hours
 
 <div align="center">
 
