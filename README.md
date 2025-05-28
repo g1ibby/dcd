@@ -336,8 +336,6 @@ dcd up user@your-server.com
 # Celebrate! 🎉
 ```
 
-**[⭐ Star this repo](https://github.com/g1ibby/dcd)** if you found it useful!
-
 ---
 
 <div align="center">
@@ -354,8 +352,6 @@ While DCD handles most Docker Compose deployments perfectly, there are a few cur
 
 - **Build Context**: Services using `build:` directive aren't supported yet. Use pre-built images from registries instead.
 - **Platform Support**: Currently optimized for Debian/Ubuntu systems. Other Linux distributions may need adjustments.
-
-*These limitations affect less than 5% of typical deployments and are on our roadmap to address.*
 
 ---
 
