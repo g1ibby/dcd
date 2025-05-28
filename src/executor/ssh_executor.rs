@@ -133,7 +133,11 @@ fn expand_tilde_path(key_path: &Path) -> Result<std::path::PathBuf, ExecutorErro
         } else if let Some(stripped) = path_str.strip_prefix("~/") {
             Ok(home.join(stripped))
         } else {
-            Ok(key_path.to_path_buf()) // Fallback for other ~ patterns
+            // Handle unsupported tilde patterns like ~user/path
+            return Err(ExecutorError::SshError(format!(
+                "Unsupported tilde pattern '{}'. Only '~' and '~/' are supported for path expansion.",
+                path_str
+            )));
         }
     } else {
         Ok(key_path.to_path_buf())
@@ -146,7 +150,7 @@ async fn try_ssh_connection<A: tokio::net::ToSocketAddrs + Clone>(
     username: &str,
     addr: A,
     target_host_str: &str,
-    known_hosts_map: &HashMap<String, Vec<keys::PublicKey>>,
+    known_hosts_map: &Arc<HashMap<String, Vec<keys::PublicKey>>>,
     timeout: Duration,
     suppress_unknown_host_warning: bool,
 ) -> Result<SshClient, ExecutorError> {
@@ -155,7 +159,7 @@ async fn try_ssh_connection<A: tokio::net::ToSocketAddrs + Clone>(
         username,
         addr,
         target_host_str.to_string(),
-        known_hosts_map.clone(),
+        Arc::clone(known_hosts_map),
         timeout,
         suppress_unknown_host_warning,
     )
@@ -175,7 +179,7 @@ impl SshClient {
         username: &str,
         addr: A,
         target_host_str: String,
-        known_hosts_map: HashMap<String, Vec<keys::PublicKey>>,
+        known_hosts_map: Arc<HashMap<String, Vec<keys::PublicKey>>>,
         timeout: Duration,
         suppress_unknown_host_warning: bool,
     ) -> Result<Self, ExecutorError> {
@@ -194,7 +198,7 @@ impl SshClient {
         // Create the handler with the resolved host and loaded keys provided by caller
         let handler = ClientHandler::new(
             target_host_str.clone(),
-            known_hosts_map,
+            (*known_hosts_map).clone(),
             suppress_unknown_host_warning,
         );
 
@@ -475,7 +479,7 @@ impl SshCommandExecutor {
             })?;
 
         tracing::debug!("Loading known hosts from: {}", known_hosts_path.display());
-        let known_hosts_map = load_known_hosts(&known_hosts_path).await?;
+        let known_hosts_map = Arc::new(load_known_hosts(&known_hosts_path).await?);
 
         // --- Try SSH Connection with Key(s) ---
         if let Some(user_key) = key_path {
