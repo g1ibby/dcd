@@ -57,7 +57,7 @@ struct ClientHandler {
     /// The hostname or IP address the client intended to connect to.
     target_host: String,
     /// Keys loaded from the known_hosts file.
-    trusted_keys: HashMap<String, Vec<keys::PublicKey>>,
+    trusted_keys: Arc<HashMap<String, Vec<keys::PublicKey>>>,
     /// If true, suppress printing the unknown-host-key warning.
     suppress_unknown_host_warning: bool,
 }
@@ -66,7 +66,7 @@ impl ClientHandler {
     /// Create a new client handler with the given target host, trusted keys, and warning flag.
     fn new(
         target_host: String,
-        trusted_keys: HashMap<String, Vec<keys::PublicKey>>,
+        trusted_keys: Arc<HashMap<String, Vec<keys::PublicKey>>>,
         suppress_unknown_host_warning: bool,
     ) -> Self {
         Self {
@@ -198,7 +198,7 @@ impl SshClient {
         // Create the handler with the resolved host and loaded keys provided by caller
         let handler = ClientHandler::new(
             target_host_str.clone(),
-            (*known_hosts_map).clone(),
+            Arc::clone(&known_hosts_map),
             suppress_unknown_host_warning,
         );
 
