@@ -28,7 +28,7 @@ impl Status {
     pub async fn run(&self, cli_args: &Cli) -> Result<(), CliError> {
         let target = parse_ssh_target(&self.target)?;
         info!("Checking status on {}", ui::format_highlight(&self.target));
-        debug!(user = %target.user, port = %target.port, key = %cli_args.identity_file.display(), "SSH details");
+        debug!(user = %target.user, port = %target.port, key = ?cli_args.identity_file, "SSH details");
 
         // --- Setup Progress Reporting ---
         let (progress_sender, ui_update_task_handle) = if !self.no_progress {
@@ -57,7 +57,7 @@ impl Status {
         info!("Connecting to {}...", ui::format_highlight(&target.host)); // Use info log
         let addr_str = format!("{}:{}", target.host, target.port);
         let mut executor = SshCommandExecutor::connect(
-            &cli_args.identity_file,
+            cli_args.identity_file.as_ref(),
             &target.user,
             &addr_str,
             Duration::from_secs(30),

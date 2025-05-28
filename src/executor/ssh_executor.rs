@@ -57,7 +57,7 @@ struct ClientHandler {
     /// The hostname or IP address the client intended to connect to.
     target_host: String,
     /// Keys loaded from the known_hosts file.
-    trusted_keys: HashMap<String, Vec<keys::PublicKey>>,
+    trusted_keys: Arc<HashMap<String, Vec<keys::PublicKey>>>,
     /// If true, suppress printing the unknown-host-key warning.
     suppress_unknown_host_warning: bool,
 }
@@ -66,7 +66,7 @@ impl ClientHandler {
     /// Create a new client handler with the given target host, trusted keys, and warning flag.
     fn new(
         target_host: String,
-        trusted_keys: HashMap<String, Vec<keys::PublicKey>>,
+        trusted_keys: Arc<HashMap<String, Vec<keys::PublicKey>>>,
         suppress_unknown_host_warning: bool,
     ) -> Self {
         Self {
@@ -121,6 +121,51 @@ impl client::Handler for ClientHandler {
     }
 }
 
+/// Expands tilde (~) in a path to the user's home directory
+fn expand_tilde_path(key_path: &Path) -> Result<std::path::PathBuf, ExecutorError> {
+    if key_path.starts_with("~") {
+        let home = dirs::home_dir().ok_or_else(|| {
+            ExecutorError::SshError("Could not determine home directory".to_string())
+        })?;
+        let path_str = key_path.to_string_lossy();
+        if path_str == "~" {
+            Ok(home)
+        } else if let Some(stripped) = path_str.strip_prefix("~/") {
+            Ok(home.join(stripped))
+        } else {
+            // Handle unsupported tilde patterns like ~user/path
+            return Err(ExecutorError::SshError(format!(
+                "Unsupported tilde pattern '{}'. Only '~' and '~/' are supported for path expansion.",
+                path_str
+            )));
+        }
+    } else {
+        Ok(key_path.to_path_buf())
+    }
+}
+
+/// Attempts to connect with a specific SSH key
+async fn try_ssh_connection<A: tokio::net::ToSocketAddrs + Clone>(
+    key_path: &Path,
+    username: &str,
+    addr: A,
+    target_host_str: &str,
+    known_hosts_map: &Arc<HashMap<String, Vec<keys::PublicKey>>>,
+    timeout: Duration,
+    suppress_unknown_host_warning: bool,
+) -> Result<SshClient, ExecutorError> {
+    SshClient::connect(
+        key_path,
+        username,
+        addr,
+        target_host_str.to_string(),
+        Arc::clone(known_hosts_map),
+        timeout,
+        suppress_unknown_host_warning,
+    )
+    .await
+}
+
 /// The underlying SSH client that manages the russh connection and optional SFTP session.
 pub struct SshClient {
     session: client::Handle<ClientHandler>,
@@ -134,12 +179,16 @@ impl SshClient {
         username: &str,
         addr: A,
         target_host_str: String,
-        known_hosts_map: HashMap<String, Vec<keys::PublicKey>>,
+        known_hosts_map: Arc<HashMap<String, Vec<keys::PublicKey>>>,
         timeout: Duration,
         suppress_unknown_host_warning: bool,
     ) -> Result<Self, ExecutorError> {
         let key_pair = keys::load_secret_key(key_path.as_ref(), None)
-            .map_err(|e| ExecutorError::SshError(e.to_string()))?;
+            .map_err(|e| ExecutorError::SshError(format!(
+                "Failed to load SSH private key from '{}': {}. Please check file permissions and key format.",
+                key_path.as_ref().display(),
+                e
+            )))?;
 
         let config = client::Config {
             inactivity_timeout: Some(timeout),
@@ -148,14 +197,18 @@ impl SshClient {
         let config = Arc::new(config);
         // Create the handler with the resolved host and loaded keys provided by caller
         let handler = ClientHandler::new(
-            target_host_str,
-            known_hosts_map,
+            target_host_str.clone(),
+            Arc::clone(&known_hosts_map),
             suppress_unknown_host_warning,
         );
 
         let mut session = client::connect(config, addr, handler)
             .await
-            .map_err(|e| ExecutorError::SshError(e.to_string()))?;
+            .map_err(|e| ExecutorError::SshError(format!(
+                "Failed to establish SSH connection to '{}': {}. Please check network connectivity and host availability.",
+                target_host_str,
+                e
+            )))?;
 
         // Get the best supported RSA hash algorithm, falling back to SHA1 if server doesn't support negotiation
         let best_hash = session
@@ -179,7 +232,10 @@ impl SshClient {
             .map_err(|e| ExecutorError::SshError(e.to_string()))?;
 
         if !auth_result.success() {
-            return Err(ExecutorError::SshError("Authentication failed".to_string()));
+            return Err(ExecutorError::SshError(format!(
+                "SSH authentication failed using key '{}'. Please check the key file and ensure it's authorized on the remote host.",
+                key_path.as_ref().display()
+            )));
         }
 
         Ok(Self {
@@ -391,7 +447,7 @@ pub struct SshCommandExecutor {
 impl SshCommandExecutor {
     /// Create a new SSH-based executor by connecting to the remote host.
     pub async fn connect(
-        key_path: impl AsRef<Path>,
+        key_path: Option<impl AsRef<Path>>,
         username: &str,
         addr: &str,
         timeout: Duration,
@@ -423,18 +479,94 @@ impl SshCommandExecutor {
             })?;
 
         tracing::debug!("Loading known hosts from: {}", known_hosts_path.display());
-        let known_hosts_map = load_known_hosts(&known_hosts_path).await?;
-        let client = SshClient::connect(
-            key_path,
-            username,
-            resolved_addr,
-            target_host_str,
-            known_hosts_map,
-            timeout,
-            suppress_unknown_host_warning,
-        )
-        .await?;
-        Ok(SshCommandExecutor { client })
+        let known_hosts_map = Arc::new(load_known_hosts(&known_hosts_path).await?);
+
+        // --- Try SSH Connection with Key(s) ---
+        if let Some(user_key) = key_path {
+            // User specified a key - use only that key
+            let expanded_path = expand_tilde_path(user_key.as_ref())?;
+            if !expanded_path.exists() {
+                return Err(ExecutorError::SshError(format!(
+                    "Specified SSH key file not found: {}",
+                    expanded_path.display()
+                )));
+            }
+
+            tracing::debug!("Using user-specified SSH key: {}", expanded_path.display());
+            let client = try_ssh_connection(
+                &expanded_path,
+                username,
+                resolved_addr,
+                &target_host_str,
+                &known_hosts_map,
+                timeout,
+                suppress_unknown_host_warning,
+            )
+            .await?;
+
+            Ok(SshCommandExecutor { client })
+        } else {
+            // Auto-detect and try multiple keys
+            let home_dir = dirs::home_dir().ok_or_else(|| {
+                ExecutorError::SshError("Could not determine home directory".to_string())
+            })?;
+
+            let ssh_dir = home_dir.join(".ssh");
+            let potential_keys = vec![ssh_dir.join("id_rsa"), ssh_dir.join("id_ed25519")];
+
+            let mut connection_errors = Vec::new();
+
+            for key_path in &potential_keys {
+                if !key_path.exists() {
+                    tracing::debug!("SSH key not found: {}", key_path.display());
+                    continue;
+                }
+
+                tracing::debug!("Trying SSH key: {}", key_path.display());
+                match try_ssh_connection(
+                    key_path,
+                    username,
+                    resolved_addr,
+                    &target_host_str,
+                    &known_hosts_map,
+                    timeout,
+                    suppress_unknown_host_warning,
+                )
+                .await
+                {
+                    Ok(client) => {
+                        tracing::info!(
+                            "Successfully connected using SSH key: {}",
+                            key_path.display()
+                        );
+                        return Ok(SshCommandExecutor { client });
+                    }
+                    Err(e) => {
+                        tracing::debug!("Failed to connect with key {}: {}", key_path.display(), e);
+                        connection_errors.push(format!("{}: {}", key_path.display(), e));
+                    }
+                }
+            }
+
+            // If we get here, all keys failed
+            let existing_keys: Vec<_> = potential_keys
+                .iter()
+                .filter(|k| k.exists())
+                .map(|k| k.display().to_string())
+                .collect();
+
+            if existing_keys.is_empty() {
+                Err(ExecutorError::SshError(
+                    "No SSH keys found. Tried ~/.ssh/id_rsa and ~/.ssh/id_ed25519. Please specify a key with --identity or generate SSH keys.".to_string()
+                ))
+            } else {
+                Err(ExecutorError::SshError(format!(
+                    "Failed to connect with any available SSH keys. Tried: {}. Errors: {}",
+                    existing_keys.join(", "),
+                    connection_errors.join("; ")
+                )))
+            }
+        }
     }
 }
 

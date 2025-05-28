@@ -34,7 +34,7 @@ impl Up {
             "Deploying services to {}",
             ui::format_highlight(&self.target)
         );
-        debug!(user = %target.user, port = %target.port, key = %cli_args.identity_file.display(), "SSH details");
+        debug!(user = %target.user, port = %target.port, key = ?cli_args.identity_file, "SSH details");
 
         // --- Local Analysis ---
         let analysis_pb = ui::create_spinner("Performing local analysis...");
@@ -52,7 +52,7 @@ impl Up {
         ));
         let addr_str = format!("{}:{}", target.host, target.port);
         let mut executor = SshCommandExecutor::connect(
-            &cli_args.identity_file,
+            cli_args.identity_file.as_ref(),
             &target.user,
             &addr_str,
             Duration::from_secs(30), // TODO: Make timeout configurable
