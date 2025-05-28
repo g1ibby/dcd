@@ -121,61 +121,45 @@ impl client::Handler for ClientHandler {
     }
 }
 
-/// Attempts to find and return a valid SSH private key file.
-/// Tries the following in order:
-/// 1. User-specified key file (if provided)
-/// 2. ~/.ssh/id_rsa (if exists)
-/// 3. ~/.ssh/id_ed25519 (if exists)
-async fn find_ssh_key(user_specified: Option<&Path>) -> Result<std::path::PathBuf, ExecutorError> {
-    // If user specified a key, use it (with tilde expansion)
-    if let Some(key_path) = user_specified {
-        let expanded_path = if key_path.starts_with("~") {
-            let home = dirs::home_dir().ok_or_else(|| {
-                ExecutorError::SshError("Could not determine home directory".to_string())
-            })?;
-            let path_str = key_path.to_string_lossy();
-            if path_str == "~" {
-                home
-            } else if let Some(stripped) = path_str.strip_prefix("~/") {
-                home.join(stripped) // Remove ~/ prefix
-            } else {
-                key_path.to_path_buf() // Fallback for other ~ patterns
-            }
+/// Expands tilde (~) in a path to the user's home directory
+fn expand_tilde_path(key_path: &Path) -> Result<std::path::PathBuf, ExecutorError> {
+    if key_path.starts_with("~") {
+        let home = dirs::home_dir().ok_or_else(|| {
+            ExecutorError::SshError("Could not determine home directory".to_string())
+        })?;
+        let path_str = key_path.to_string_lossy();
+        if path_str == "~" {
+            Ok(home)
+        } else if let Some(stripped) = path_str.strip_prefix("~/") {
+            Ok(home.join(stripped))
         } else {
-            key_path.to_path_buf()
-        };
-
-        if expanded_path.exists() {
-            return Ok(expanded_path);
-        } else {
-            return Err(ExecutorError::SshError(format!(
-                "Specified SSH key file not found: {}",
-                expanded_path.display()
-            )));
+            Ok(key_path.to_path_buf()) // Fallback for other ~ patterns
         }
+    } else {
+        Ok(key_path.to_path_buf())
     }
+}
 
-    // Try default SSH key locations
-    let home_dir = dirs::home_dir()
-        .ok_or_else(|| ExecutorError::SshError("Could not determine home directory".to_string()))?;
-
-    let ssh_dir = home_dir.join(".ssh");
-    let rsa_key = ssh_dir.join("id_rsa");
-    let ed25519_key = ssh_dir.join("id_ed25519");
-
-    if rsa_key.exists() {
-        tracing::debug!("Using SSH key: {}", rsa_key.display());
-        return Ok(rsa_key);
-    }
-
-    if ed25519_key.exists() {
-        tracing::debug!("Using SSH key: {}", ed25519_key.display());
-        return Ok(ed25519_key);
-    }
-
-    Err(ExecutorError::SshError(
-        "No SSH key found. Tried ~/.ssh/id_rsa and ~/.ssh/id_ed25519. Please specify a key with --identity or generate SSH keys.".to_string()
-    ))
+/// Attempts to connect with a specific SSH key
+async fn try_ssh_connection<A: tokio::net::ToSocketAddrs + Clone>(
+    key_path: &Path,
+    username: &str,
+    addr: A,
+    target_host_str: &str,
+    known_hosts_map: &HashMap<String, Vec<keys::PublicKey>>,
+    timeout: Duration,
+    suppress_unknown_host_warning: bool,
+) -> Result<SshClient, ExecutorError> {
+    SshClient::connect(
+        key_path,
+        username,
+        addr,
+        target_host_str.to_string(),
+        known_hosts_map.clone(),
+        timeout,
+        suppress_unknown_host_warning,
+    )
+    .await
 }
 
 /// The underlying SSH client that manages the russh connection and optional SFTP session.
@@ -465,8 +449,6 @@ impl SshCommandExecutor {
         timeout: Duration,
         suppress_unknown_host_warning: bool,
     ) -> Result<Self, ExecutorError> {
-        // Find the SSH key to use
-        let key_to_use = find_ssh_key(key_path.as_ref().map(|p| p.as_ref())).await?;
         // --- Resolve hostname/IP ---
         let resolved_addr = tokio::net::lookup_host(addr)
             .await
@@ -494,17 +476,93 @@ impl SshCommandExecutor {
 
         tracing::debug!("Loading known hosts from: {}", known_hosts_path.display());
         let known_hosts_map = load_known_hosts(&known_hosts_path).await?;
-        let client = SshClient::connect(
-            &key_to_use,
-            username,
-            resolved_addr,
-            target_host_str,
-            known_hosts_map,
-            timeout,
-            suppress_unknown_host_warning,
-        )
-        .await?;
-        Ok(SshCommandExecutor { client })
+
+        // --- Try SSH Connection with Key(s) ---
+        if let Some(user_key) = key_path {
+            // User specified a key - use only that key
+            let expanded_path = expand_tilde_path(user_key.as_ref())?;
+            if !expanded_path.exists() {
+                return Err(ExecutorError::SshError(format!(
+                    "Specified SSH key file not found: {}",
+                    expanded_path.display()
+                )));
+            }
+
+            tracing::debug!("Using user-specified SSH key: {}", expanded_path.display());
+            let client = try_ssh_connection(
+                &expanded_path,
+                username,
+                resolved_addr,
+                &target_host_str,
+                &known_hosts_map,
+                timeout,
+                suppress_unknown_host_warning,
+            )
+            .await?;
+
+            Ok(SshCommandExecutor { client })
+        } else {
+            // Auto-detect and try multiple keys
+            let home_dir = dirs::home_dir().ok_or_else(|| {
+                ExecutorError::SshError("Could not determine home directory".to_string())
+            })?;
+
+            let ssh_dir = home_dir.join(".ssh");
+            let potential_keys = vec![ssh_dir.join("id_rsa"), ssh_dir.join("id_ed25519")];
+
+            let mut connection_errors = Vec::new();
+
+            for key_path in &potential_keys {
+                if !key_path.exists() {
+                    tracing::debug!("SSH key not found: {}", key_path.display());
+                    continue;
+                }
+
+                tracing::debug!("Trying SSH key: {}", key_path.display());
+                match try_ssh_connection(
+                    key_path,
+                    username,
+                    resolved_addr,
+                    &target_host_str,
+                    &known_hosts_map,
+                    timeout,
+                    suppress_unknown_host_warning,
+                )
+                .await
+                {
+                    Ok(client) => {
+                        tracing::info!(
+                            "Successfully connected using SSH key: {}",
+                            key_path.display()
+                        );
+                        return Ok(SshCommandExecutor { client });
+                    }
+                    Err(e) => {
+                        tracing::debug!("Failed to connect with key {}: {}", key_path.display(), e);
+                        connection_errors.push(format!("{}: {}", key_path.display(), e));
+                    }
+                }
+            }
+
+            // If we get here, all keys failed
+            let existing_keys: Vec<_> = potential_keys
+                .iter()
+                .filter(|k| k.exists())
+                .map(|k| k.display().to_string())
+                .collect();
+
+            if existing_keys.is_empty() {
+                Err(ExecutorError::SshError(
+                    "No SSH keys found. Tried ~/.ssh/id_rsa and ~/.ssh/id_ed25519. Please specify a key with --identity or generate SSH keys.".to_string()
+                ))
+            } else {
+                Err(ExecutorError::SshError(format!(
+                    "Failed to connect with any available SSH keys. Tried: {}. Errors: {}",
+                    existing_keys.join(", "),
+                    connection_errors.join("; ")
+                )))
+            }
+        }
     }
 }
 
