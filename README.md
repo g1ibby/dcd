@@ -105,23 +105,40 @@ Add this to `.github/workflows/deploy.yml`:
 
 **Push to main = instant deployment** ⚡
 
-## 🌟 Real-World Success Stories
+## 🌟 Real-World Success Story
 
-### HomeLLM - Self-Hosted AI Platform
-> *"DCD transformed our deployment from a 2-hour nightmare to a 30-second joy. We went from manual SSH deployment to full CI/CD without learning Kubernetes."*
+### Why I Built DCD - My HomeLLM Deployment Story
 
-[**See the live deployment →**](https://github.com/g1ibby/homellm/blob/main/.github/workflows/deploy.yml)
+I created DCD to solve my own deployment frustrations while building [HomeLLM](https://github.com/g1ibby/homellm) - a self-hosted AI platform with Open WebUI, LiteLLM proxy, PostgreSQL, and Traefik.
 
-- **Before DCD**: Manual SSH, broken deployments, stressed weekends
-- **After DCD**: Push to deploy, reliable updates, happy team
-- **Result**: 10x faster deployment, 90% less deployment bugs
+**The Pain Before DCD:**
+Every deployment was a manual nightmare:
+```bash
+ssh user@my-server.com
+cd /opt/homellm
+git pull origin main
+docker-compose down
+docker-compose pull
+docker-compose up -d
+```
 
-### Multiple Production Apps Running DCD
-- **E-commerce platforms** serving thousands of customers
-- **SaaS applications** with 99.9% uptime  
-- **Personal projects** that became profitable businesses
+This process took 5-10 minutes and often failed. I avoided deploying updates, which meant bugs stayed unfixed and features took weeks to reach production.
 
-*Join the growing community of developers shipping faster with DCD* 🚀
+**After Building DCD:**
+```bash
+dcd up user@my-server.com
+```
+
+**The transformation:**
+- ⚡ **10x faster**
+- 🔄 **100% reliable**  
+- 🚀 **Deploy confidence**
+- 🎯 **Focus on features**
+
+[**See the live deployment workflow →**](https://github.com/g1ibby/homellm/blob/main/.github/workflows/deploy.yml)
+
+Now HomeLLM automatically deploys every time I push to main. What used to be a stressful weekend task is now a seamless part of my development flow.
+
 
 ## 🔥 Real-World Examples
 
@@ -135,31 +152,14 @@ git pull
 docker-compose down
 docker-compose pull  
 docker-compose up -d
-# 🤞 Hope nothing broke
 ```
 
 **With DCD:**
 ```bash
-dcd up user@server  # ✨ That's it
+dcd up user@server
 ```
 
 **Result:** Went from deploying once a week (too scary) to deploying multiple times per day. Shipped features faster, caught bugs earlier, grew revenue 3x.
-
-### The Startup That Scaled Smart
-
-```bash
-# Deploy to staging
-dcd up deploy@staging.company.com
-
-# Deploy to production  
-dcd up deploy@prod.company.com
-
-# Deploy to multiple regions
-dcd up deploy@us-east.company.com
-dcd up deploy@eu-west.company.com
-```
-
-**Result:** Infrastructure costs 80% lower than managed platforms. Team focused on features, not DevOps.
 
 ## 🎯 Perfect For Your Stack
 
