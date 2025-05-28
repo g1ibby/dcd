@@ -73,7 +73,8 @@ These options apply to all commands:
 -e, --env-file <ENV_FILES>...   Environment file(s) to use. Can be specified multiple times.
                                 (Defaults based on Docker Compose standard behavior if not provided)
 -i, --identity <IDENTITY_FILE>  Path to the SSH private key for connecting to the remote host.
-                                [default: ~/.ssh/id_rsa] # Adjusted default based on parser
+                                Supports tilde (~) expansion. Auto-detects ~/.ssh/id_rsa or 
+                                ~/.ssh/id_ed25519 if not specified.
 -w, --workdir <REMOTE_DIR>      Remote working directory on the target host where files will be synced
                                 and commands executed.
                                 (Defaults to ~/.dcd/<project_name>)

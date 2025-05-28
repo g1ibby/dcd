@@ -121,6 +121,63 @@ impl client::Handler for ClientHandler {
     }
 }
 
+/// Attempts to find and return a valid SSH private key file.
+/// Tries the following in order:
+/// 1. User-specified key file (if provided)
+/// 2. ~/.ssh/id_rsa (if exists)
+/// 3. ~/.ssh/id_ed25519 (if exists)
+async fn find_ssh_key(user_specified: Option<&Path>) -> Result<std::path::PathBuf, ExecutorError> {
+    // If user specified a key, use it (with tilde expansion)
+    if let Some(key_path) = user_specified {
+        let expanded_path = if key_path.starts_with("~") {
+            let home = dirs::home_dir().ok_or_else(|| {
+                ExecutorError::SshError("Could not determine home directory".to_string())
+            })?;
+            let path_str = key_path.to_string_lossy();
+            if path_str == "~" {
+                home
+            } else if let Some(stripped) = path_str.strip_prefix("~/") {
+                home.join(stripped) // Remove ~/ prefix
+            } else {
+                key_path.to_path_buf() // Fallback for other ~ patterns
+            }
+        } else {
+            key_path.to_path_buf()
+        };
+
+        if expanded_path.exists() {
+            return Ok(expanded_path);
+        } else {
+            return Err(ExecutorError::SshError(format!(
+                "Specified SSH key file not found: {}",
+                expanded_path.display()
+            )));
+        }
+    }
+
+    // Try default SSH key locations
+    let home_dir = dirs::home_dir()
+        .ok_or_else(|| ExecutorError::SshError("Could not determine home directory".to_string()))?;
+
+    let ssh_dir = home_dir.join(".ssh");
+    let rsa_key = ssh_dir.join("id_rsa");
+    let ed25519_key = ssh_dir.join("id_ed25519");
+
+    if rsa_key.exists() {
+        tracing::debug!("Using SSH key: {}", rsa_key.display());
+        return Ok(rsa_key);
+    }
+
+    if ed25519_key.exists() {
+        tracing::debug!("Using SSH key: {}", ed25519_key.display());
+        return Ok(ed25519_key);
+    }
+
+    Err(ExecutorError::SshError(
+        "No SSH key found. Tried ~/.ssh/id_rsa and ~/.ssh/id_ed25519. Please specify a key with --identity or generate SSH keys.".to_string()
+    ))
+}
+
 /// The underlying SSH client that manages the russh connection and optional SFTP session.
 pub struct SshClient {
     session: client::Handle<ClientHandler>,
@@ -139,7 +196,11 @@ impl SshClient {
         suppress_unknown_host_warning: bool,
     ) -> Result<Self, ExecutorError> {
         let key_pair = keys::load_secret_key(key_path.as_ref(), None)
-            .map_err(|e| ExecutorError::SshError(e.to_string()))?;
+            .map_err(|e| ExecutorError::SshError(format!(
+                "Failed to load SSH private key from '{}': {}. Please check file permissions and key format.",
+                key_path.as_ref().display(),
+                e
+            )))?;
 
         let config = client::Config {
             inactivity_timeout: Some(timeout),
@@ -148,14 +209,18 @@ impl SshClient {
         let config = Arc::new(config);
         // Create the handler with the resolved host and loaded keys provided by caller
         let handler = ClientHandler::new(
-            target_host_str,
+            target_host_str.clone(),
             known_hosts_map,
             suppress_unknown_host_warning,
         );
 
         let mut session = client::connect(config, addr, handler)
             .await
-            .map_err(|e| ExecutorError::SshError(e.to_string()))?;
+            .map_err(|e| ExecutorError::SshError(format!(
+                "Failed to establish SSH connection to '{}': {}. Please check network connectivity and host availability.",
+                target_host_str,
+                e
+            )))?;
 
         // Get the best supported RSA hash algorithm, falling back to SHA1 if server doesn't support negotiation
         let best_hash = session
@@ -179,7 +244,10 @@ impl SshClient {
             .map_err(|e| ExecutorError::SshError(e.to_string()))?;
 
         if !auth_result.success() {
-            return Err(ExecutorError::SshError("Authentication failed".to_string()));
+            return Err(ExecutorError::SshError(format!(
+                "SSH authentication failed using key '{}'. Please check the key file and ensure it's authorized on the remote host.",
+                key_path.as_ref().display()
+            )));
         }
 
         Ok(Self {
@@ -391,12 +459,14 @@ pub struct SshCommandExecutor {
 impl SshCommandExecutor {
     /// Create a new SSH-based executor by connecting to the remote host.
     pub async fn connect(
-        key_path: impl AsRef<Path>,
+        key_path: Option<impl AsRef<Path>>,
         username: &str,
         addr: &str,
         timeout: Duration,
         suppress_unknown_host_warning: bool,
     ) -> Result<Self, ExecutorError> {
+        // Find the SSH key to use
+        let key_to_use = find_ssh_key(key_path.as_ref().map(|p| p.as_ref())).await?;
         // --- Resolve hostname/IP ---
         let resolved_addr = tokio::net::lookup_host(addr)
             .await
@@ -425,7 +495,7 @@ impl SshCommandExecutor {
         tracing::debug!("Loading known hosts from: {}", known_hosts_path.display());
         let known_hosts_map = load_known_hosts(&known_hosts_path).await?;
         let client = SshClient::connect(
-            key_path,
+            &key_to_use,
             username,
             resolved_addr,
             target_host_str,

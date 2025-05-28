@@ -17,13 +17,9 @@ pub struct Cli {
     #[arg(short = 'e', long = "env-file")]
     pub env_files: Vec<PathBuf>,
 
-    /// SSH private key path
-    #[arg(
-        short = 'i',
-        long = "identity",
-        default_value = "/Users/user/.ssh/id_rsa"
-    )]
-    pub identity_file: PathBuf,
+    /// SSH private key path (auto-detects ~/.ssh/id_rsa or ~/.ssh/id_ed25519 if not specified)
+    #[arg(short = 'i', long = "identity")]
+    pub identity_file: Option<PathBuf>,
 
     /// Remote working directory
     #[arg(short = 'w', long = "workdir")]
