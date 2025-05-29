@@ -190,17 +190,11 @@ jobs:
             exit 0
           fi
 
-  update_homebrew_formula:
-    name: Update Homebrew Formula
+  trigger_homebrew_update:
+    name: Trigger Homebrew Tap Update
     needs: create_github_release
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0
-
       - name: Calculate SHA256 for release binaries
         id: sha256
         run: |
@@ -217,26 +211,16 @@ jobs:
           echo "sha256_arm=$SHA256_ARM" >> $GITHUB_OUTPUT
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Update Homebrew formula
-        run: |
-          VERSION=${{ steps.sha256.outputs.version }}
-          SHA256_INTEL=${{ steps.sha256.outputs.sha256_intel }}
-          SHA256_ARM=${{ steps.sha256.outputs.sha256_arm }}
-          
-          cp homebrew-tap/Formula/dcd.rb.template homebrew-tap/Formula/dcd.rb
-          
-          sed -i "s/__VERSION__/$VERSION/g" homebrew-tap/Formula/dcd.rb
-          sed -i "s/__SHA256_INTEL__/$SHA256_INTEL/g" homebrew-tap/Formula/dcd.rb
-          sed -i "s/__SHA256_ARM__/$SHA256_ARM/g" homebrew-tap/Formula/dcd.rb
-
-      - name: Commit and push formula update
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          
-          # Switch to main branch (or create if needed)
-          git checkout main || git checkout -b main
-          
-          git add homebrew-tap/Formula/dcd.rb
-          git commit -m "Update Homebrew formula to v${{ steps.sha256.outputs.version }}"
-          git push origin main
+      - name: Trigger Homebrew tap repository update
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          repository: g1ibby/homebrew-dcd
+          event-type: version-update
+          client-payload: |
+            {
+              "version": "${{ steps.sha256.outputs.version }}",
+              "sha256_intel": "${{ steps.sha256.outputs.sha256_intel }}",
+              "sha256_arm": "${{ steps.sha256.outputs.sha256_arm }}",
+              "release_url": "https://github.com/g1ibby/dcd/releases/tag/v${{ steps.sha256.outputs.version }}"
+            }
