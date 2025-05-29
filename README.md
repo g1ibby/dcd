@@ -27,19 +27,19 @@
 
 You've built something amazing locally. `docker-compose up` works perfectly. Now you need to deploy it...
 
-**Option 1: Managed Platforms** 🏢
+**Option 1: Managed Platforms** 
 - 💸 Expensive as you scale  
 - 🔒 Vendor lock-in
 - ⚙️ Limited customization
 - 🚫 Not all apps supported
 
-**Option 2: Complex CI/CD** 🤯
+**Option 2: Complex CI/CD** 
 - 📚 Hours learning Kubernetes/Docker Swarm
 - 🔧 Complex pipeline setup
 - 🐛 More things to break
 - ⏰ Weeks to get right
 
-**What if there was a third way?** 🤔
+**What if there was a third way?** 
 
 ## ✨ Meet DCD - Your Deploy Button for Any Server
 
@@ -89,7 +89,7 @@ cargo install dcd
 # 3. Deploy!
 dcd up user@your-server.com
 
-# That's literally it. Your app is live! 🎉
+# That's literally it. Your app is live! 
 ```
 
 ### Setup Automatic Deployments
@@ -140,7 +140,7 @@ dcd up user@my-server.com
 Now HomeLLM automatically deploys every time I push to main. What used to be a stressful weekend task is now a seamless part of my development flow.
 
 
-## 🔥 Real-World Examples
+## Real-World Examples
 
 ### The Side Project That Became Profitable
 
@@ -163,7 +163,7 @@ dcd up user@server
 
 ## 🎯 Perfect For Your Stack
 
-### ✅ **What Works Great**
+### **What Works Great**
 - 🐳 Any Docker Compose app
 - 🌐 Web apps (React, Vue, Next.js...)  
 - 🗄️ Full-stack apps with databases
@@ -171,7 +171,7 @@ dcd up user@server
 - 📊 Data analytics platforms
 - 🔗 API services and microservices
 
-### ✅ **Supported Platforms**
+### **Supported Platforms**
 - 🐧 Ubuntu/Debian servers
 - ☁️ Any VPS (DigitalOcean, Linode, AWS EC2...)
 - 🏠 Self-hosted servers
@@ -192,7 +192,7 @@ dcd up user@server
 ```bash
 -f, --file <FILES>...       Docker Compose files
 -e, --env-file <FILES>...   Environment files  
--i, --identity <KEY>        SSH private key
+-i, --identity <KEY>        SSH private key (Auto-detects ~/.ssh/id_rsa or ~/.ssh/id_ed25519 if not specified)
 -w, --workdir <DIR>         Remote working directory
 -v, --verbose               Debug output
 ```
@@ -333,7 +333,6 @@ cargo install dcd
 # Deploy your app
 dcd up user@your-server.com
 
-# Celebrate! 🎉
 ```
 
 ---
