@@ -5,13 +5,13 @@ class Dcd < Formula
 
   on_macos do
     on_intel do
-      url "https://github.com/g1ibby/dcd/releases/download/v__VERSION__/dcd-x86_64-apple-darwin.tar.gz"
-      sha256 "__SHA256_INTEL__"
+      url "https://github.com/g1ibby/dcd/releases/download/v0.2.2/dcd-x86_64-apple-darwin.tar.gz"
+      sha256 "3d01bc1779154f3955368c7d228074b0328d9d834c93bcd364859d37a36f65e6"
     end
 
     on_arm do
-      url "https://github.com/g1ibby/dcd/releases/download/v__VERSION__/dcd-aarch64-apple-darwin.tar.gz"
-      sha256 "__SHA256_ARM__"
+      url "https://github.com/g1ibby/dcd/releases/download/v0.2.2/dcd-aarch64-apple-darwin.tar.gz"
+      sha256 "2e1262c7977a4cc3b1637d6391e180a22fece626600893b7f51a7c3209db7a5c"
     end
   end
 
