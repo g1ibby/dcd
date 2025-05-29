@@ -197,6 +197,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
       - name: Calculate SHA256 for release binaries
         id: sha256
@@ -230,6 +233,10 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
+          
+          # Switch to main branch (or create if needed)
+          git checkout main || git checkout -b main
+          
           git add homebrew-tap/Formula/dcd.rb
           git commit -m "Update Homebrew formula to v${{ steps.sha256.outputs.version }}"
-          git push
+          git push origin main
