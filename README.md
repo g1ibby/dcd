@@ -77,6 +77,10 @@ $5/month VPS vs $20+/month managed platform. DCD pays for itself immediately.
 
 ### Install DCD
 ```bash
+# macOS
+brew install g1ibby/dcd/dcd
+
+# Other platforms
 cargo install dcd
 ```
 
@@ -306,6 +310,11 @@ Star this repo if DCD helps your deployments! ⭐
 
 ## 📦 Installation
 
+### macOS (Homebrew)
+```bash
+brew install g1ibby/dcd/dcd
+```
+
 ### Using Cargo
 ```bash
 cargo install dcd
@@ -328,7 +337,8 @@ Stop spending hours on deployment setup. Start shipping features.
 
 ```bash
 # Install DCD
-cargo install dcd
+brew install g1ibby/dcd/dcd  # macOS
+# cargo install dcd         # Other platforms
 
 # Deploy your app
 dcd up user@your-server.com
